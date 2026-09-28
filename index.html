@@ -5846,7 +5846,11 @@
             adicionarPagamentoBaixaCarteira();
             document.getElementById('baixaPagamentosContainer').querySelector('.baixaValor').value = '';
             atualizarResumoBaixaCarteira();
-            document.getElementById('modalBaixaCarteira').classList.add('active');
+            const modal = document.getElementById('modalBaixaCarteira');
+            if (modal) {
+                modal.style.display = 'block';
+                document.body.style.overflow = 'hidden';
+            }
         }
 
         async function darBaixaCarteira(id) {
