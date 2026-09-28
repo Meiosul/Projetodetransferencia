@@ -1857,6 +1857,11 @@
                     <input type="number" id="estoqueQuantidade" min="1" required>
                 </div>
 
+                <div class="form-row">
+                    <div class="form-group" style="flex:1;"><label>Valor de Venda (R$)</label><input type="number" id="estoqueValorVenda" step="0.01" min="0" placeholder="0,00"></div>
+                    <div class="form-group" style="flex:1;"><label>Valor Mínimo de Venda (R$)</label><input type="number" id="estoqueValorMinimoVenda" step="0.01" min="0" placeholder="0,00"></div>
+                </div>
+
                 <div class="form-group">
                     <label>Valor de Compra</label>
                     <div class="form-row">
@@ -1948,6 +1953,8 @@
                     <p><strong>Produto:</strong> <span id="incluirProdutoNome"></span></p>
                     <p><strong>Quantidade atual:</strong> <span id="incluirQtdAtual"></span></p>
                     <p><strong>Valor médio atual:</strong> <span id="incluirValorMedioAtual"></span></p>
+                    <p><strong>Valor de venda:</strong> <span id="incluirValorVendaAtual"></span></p>
+                    <p><strong>Valor mínimo de venda:</strong> <span id="incluirValorMinimoVendaAtual"></span></p>
                     <p><strong>Valor total atual:</strong> <span id="incluirValorTotalAtual"></span></p>
                 </div>
                 <div class="form-group">
@@ -2050,6 +2057,11 @@
                     <input type="number" id="alterarQuantidade" min="0" required>
                 </div>
 
+                <div class="form-row">
+                    <div class="form-group" style="flex:1;"><label>Valor de Venda (R$)</label><input type="number" id="alterarValorVenda" step="0.01" min="0" placeholder="0,00"></div>
+                    <div class="form-group" style="flex:1;"><label>Valor Mínimo de Venda (R$)</label><input type="number" id="alterarValorMinimoVenda" step="0.01" min="0" placeholder="0,00"></div>
+                </div>
+
                 <div class="form-group">
                     <label>Valor de Compra (R$)</label>
                     <input type="number" id="alterarValor" step="0.01" placeholder="0,00" required>
@@ -2103,7 +2115,7 @@
                         <div class="produto-item">
                             <select class="vendaPneu" required></select>
                             <input type="number" class="vendaQuantidade" placeholder="Qtd" min="1" required>
-                            <input type="number" class="vendaValorUnitario" placeholder="Valor Unitário" step="0.01" required>
+                            <input type="number" class="vendaValorUnitario" placeholder="Valor Unitário" step="0.01" min="0" required>
                             <select class="vendaMoeda" onchange="updateTotalPreview()">
                                 <option value="BRL">R$</option>
                                 <option value="USD">US$</option>
@@ -3078,6 +3090,8 @@
             document.getElementById('incluirProdutoNome').textContent = nomeProduto;
             document.getElementById('incluirQtdAtual').textContent = produto.quantidade;
             document.getElementById('incluirValorMedioAtual').textContent = `R$ ${produto.valorCompra.toFixed(2)}`;
+            document.getElementById('incluirValorVendaAtual').textContent = `R$ ${(produto.valorVenda || 0).toFixed(2)}`;
+            document.getElementById('incluirValorMinimoVendaAtual').textContent = `R$ ${(produto.valorMinimoVenda || 0).toFixed(2)}`;
             
             const valorTotal = produto.quantidade * produto.valorCompra;
             document.getElementById('incluirValorTotalAtual').textContent = `R$ ${valorTotal.toFixed(2)}`;
@@ -3248,6 +3262,8 @@
             document.getElementById('alterarProfundidade').value = produto.profundidade || '';
             document.getElementById('alterarQuantidade').value = produto.quantidade || 0;
             document.getElementById('alterarValor').value = produto.valorCompra || 0;
+            document.getElementById('alterarValorVenda').value = produto.valorVenda || 0;
+            document.getElementById('alterarValorMinimoVenda').value = produto.valorMinimoVenda || 0;
             
             // Esconder campos custom
             document.getElementById('alterarMarcaCustom').style.display = 'none';
@@ -3313,12 +3329,19 @@
             
             const quantidade = parseInt(document.getElementById('alterarQuantidade').value);
             const valor = parseFloat(document.getElementById('alterarValor').value);
+            const valorVenda = parseFloat(document.getElementById('alterarValorVenda').value) || 0;
+            const valorMinimoVenda = parseFloat(document.getElementById('alterarValorMinimoVenda').value) || 0;
             
             if (!medida || !profundidade || isNaN(quantidade) || quantidade < 0 || !valor || valor <= 0) {
                 alert('Preencha todos os campos corretamente.');
                 return;
             }
             
+            if (valorMinimoVenda > 0 && valorVenda > 0 && valorMinimoVenda > valorVenda) {
+                alert('O valor mínimo de venda não pode ser maior que o valor de venda.');
+                return;
+            }
+
             // Para carcaça, marca é obrigatória
             if (profundidade === 'Carcaça' && !marca) {
                 alert('Para pneus de CARCAÇA, a marca é obrigatória.');
@@ -3333,6 +3356,8 @@
             produto.profundidade = profundidade;
             produto.quantidade = quantidade;
             produto.valorCompra = valor;
+            produto.valorVenda = valorVenda;
+            produto.valorMinimoVenda = valorMinimoVenda;
             
             // Atualizar valor em USD médio
             const cot = getCotacao();
@@ -3437,10 +3462,16 @@
 
             const quantidade = parseInt(document.getElementById('estoqueQuantidade').value);
             const valorCompra = parseFloat(document.getElementById('estoqueValor').value);
+            const valorVendaInformado = parseFloat(document.getElementById('estoqueValorVenda').value) || 0;
+            const valorMinimoVendaInformado = parseFloat(document.getElementById('estoqueValorMinimoVenda').value) || 0;
             const moeda = document.getElementById('estoqueMoeda').value;
 
             if (!quantidade || !valorCompra) {
                 alert('Preencha todos os campos.');
+                return;
+            }
+            if (valorMinimoVendaInformado > 0 && valorVendaInformado > 0 && valorMinimoVendaInformado > valorVendaInformado) {
+                alert('O valor mínimo de venda não pode ser maior que o valor de venda.');
                 return;
             }
 
@@ -3506,6 +3537,8 @@
                     quantidade,
                     valorCompra: valorEmBRL,
                     valorUSD: valorEmUSD,
+                    valorVenda: valorVendaInformado,
+                    valorMinimoVenda: valorMinimoVendaInformado,
                     moeda: 'BRL',
                     moedaOriginal: moeda,
                     cotacaoUsada: cotacaoUsada || null,
@@ -3875,6 +3908,8 @@
                                             <th>Profundidade</th>
                                             <th>Quantidade</th>
                                             <th>Valor Médio</th>
+                                            <th>Valor Venda</th>
+                                            <th>Valor Mínimo</th>
                                             <th>Moeda</th>
                                             <th>Ações</th>
                                         </tr>
@@ -3903,6 +3938,8 @@
                             <td>${item.profundidade}</td>
                             <td>${item.quantidade}</td>
                             <td>${valorDisplay}</td>
+                            <td>R$ ${(item.valorVenda || 0).toFixed(2)}</td>
+                            <td>R$ ${(item.valorMinimoVenda || 0).toFixed(2)}</td>
                             <td>${moedaDisplay}</td>
                             <td>
                                 <button class="btn btn-incluir" onclick="abrirModalIncluir(${item.id})">➕ Incluir</button>
@@ -4182,7 +4219,7 @@
             div.innerHTML = `
                 <select class="vendaPneu" required></select>
                 <input type="number" class="vendaQuantidade" placeholder="Qtd" min="1" required>
-                <input type="number" class="vendaValorUnitario" placeholder="Valor Unitário" step="0.01" required>
+                <input type="number" class="vendaValorUnitario" placeholder="Valor Unitário" step="0.01" min="0" required>
                 <select class="vendaMoeda" onchange="updateTotalPreview()">
                     <option value="BRL">R$</option>
                     <option value="USD">US$</option>
@@ -4214,6 +4251,8 @@
                 if (e.quantidade > 0) {
                     const option = document.createElement('option');
                     option.value = e.id;
+                    option.dataset.valorVenda = e.valorVenda || 0;
+                    option.dataset.valorMinimoVenda = e.valorMinimoVenda || 0;
                     const marcaDisplay = e.marca ? e.marca + ' ' : '';
                     option.textContent = `${marcaDisplay}${e.medida} - ${e.profundidade} (Qtd: ${e.quantidade})`;
                     select.appendChild(option);
@@ -4225,6 +4264,14 @@
                 option.textContent = 'Sem pneus disponíveis';
                 select.appendChild(option);
             }
+            const aplicarValorVenda = () => {
+                const opt = select.options[select.selectedIndex];
+                const campoValor = select.closest('.produto-item')?.querySelector('.vendaValorUnitario');
+                if (campoValor && opt && Number(opt.dataset.valorVenda) > 0) campoValor.value = Number(opt.dataset.valorVenda).toFixed(2);
+                updateTotalPreview();
+            };
+            select.onchange = aplicarValorVenda;
+            aplicarValorVenda();
         }
 
         function adicionarPagamento() {
@@ -4358,6 +4405,15 @@
                 if (pneu.quantidade < quantidade) {
                     alert(`Estoque insuficiente para ${pneu.marca || 'pneu'}. Disponível: ${pneu.quantidade}`);
                     return;
+                }
+
+                const valorMinimoVenda = Number(pneu.valorMinimoVenda || 0);
+                if (valorMinimoVenda > 0) {
+                    const valorBRLParaValidacao = moeda === 'USD' ? valorUnitario * cot.valor : valorUnitario;
+                    if (valorBRLParaValidacao + 0.001 < valorMinimoVenda) {
+                        alert(`O valor de venda não pode ser menor que o valor mínimo cadastrado: R$ ${valorMinimoVenda.toFixed(2)}.`);
+                        return;
+                    }
                 }
 
                 let valorEmBRL = valorUnitario;
@@ -4514,7 +4570,7 @@
                 <div class="produto-item">
                     <select class="vendaPneu" required></select>
                     <input type="number" class="vendaQuantidade" placeholder="Qtd" min="1" required>
-                    <input type="number" class="vendaValorUnitario" placeholder="Valor Unitário" step="0.01" required>
+                    <input type="number" class="vendaValorUnitario" placeholder="Valor Unitário" step="0.01" min="0" required>
                     <select class="vendaMoeda" onchange="updateTotalPreview()">
                         <option value="BRL">R$</option>
                         <option value="USD">US$</option>
