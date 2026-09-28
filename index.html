@@ -1896,10 +1896,40 @@
                         <option value="filial">Estoque Filial</option>
                     </select>
                 </div>
-                <div style="background:#fff8e1; padding:12px; border-radius:5px; margin-bottom:15px; color:#795548;">
-                    ℹ️ A transferência apenas movimenta os pneus entre os estoques. Não será gerado custo de compra.
+
+                <div style="background:#e8f5e9; border:1px solid #a5d6a7; padding:12px; border-radius:5px; margin-bottom:15px; color:#1b5e20;">
+                    ℹ️ Você pode transferir sem acréscimo ou adicionar um custo à transferência. O acréscimo altera o valor de custo das unidades que chegarem ao estoque de destino.
                 </div>
+
+                <div class="form-group">
+                    <label>Incrementar valor na transferência</label>
+                    <div style="display:flex; gap:15px; flex-wrap:wrap; align-items:center; padding:10px; background:#f8f9fa; border:1px solid #ddd; border-radius:5px;">
+                        <label style="display:flex; align-items:center; gap:6px; margin:0; cursor:pointer;">
+                            <input type="radio" name="tipoIncrementoTransferencia" value="nenhum" checked onchange="atualizarIncrementoTransferencia()">
+                            Nenhum
+                        </label>
+                        <label style="display:flex; align-items:center; gap:6px; margin:0; cursor:pointer;">
+                            <input type="radio" name="tipoIncrementoTransferencia" value="unico" onchange="atualizarIncrementoTransferencia()">
+                            Valor único para transferência
+                        </label>
+                        <label style="display:flex; align-items:center; gap:6px; margin:0; cursor:pointer;">
+                            <input type="radio" name="tipoIncrementoTransferencia" value="individual" onchange="atualizarIncrementoTransferencia()">
+                            Valor individual
+                        </label>
+                    </div>
+                </div>
+
+                <div id="transferenciaValorUnicoContainer" class="form-group" style="display:none;">
+                    <label>Valor único a acrescentar por unidade</label>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span style="font-weight:600;">R$</span>
+                        <input type="number" id="transferenciaValorUnico" min="0" step="0.01" value="0" placeholder="0,00">
+                    </div>
+                    <small style="color:#666;">Esse valor será acrescentado ao custo de cada unidade transferida.</small>
+                </div>
+
                 <div id="transferenciaItens"></div>
+
                 <button type="button" class="btn btn-primary" onclick="adicionarItemTransferencia()" style="margin:10px 0;">+ Adicionar pneu</button>
                 <button type="submit" class="btn btn-success" style="width:100%;">↔️ Confirmar transferência</button>
             </form>
@@ -2977,9 +3007,14 @@
                 if (id === 'modalTransferenciaEstoque') {
                     const destino = document.getElementById('transferenciaDestino');
                     destino.value = filialAtual === 'toledo' ? 'filial' : 'toledo';
+                    const tipoNenhum = document.querySelector('input[name="tipoIncrementoTransferencia"][value="nenhum"]');
+                    if (tipoNenhum) tipoNenhum.checked = true;
+                    const valorUnico = document.getElementById('transferenciaValorUnico');
+                    if (valorUnico) valorUnico.value = '0';
                     const container = document.getElementById('transferenciaItens');
                     container.innerHTML = '';
                     adicionarItemTransferencia();
+                    atualizarIncrementoTransferencia();
                 }
                 if (id === 'modalEstoque') {
                     document.getElementById('estoqueProfundidade').value = '';
@@ -3515,6 +3550,37 @@
             return filial === 'toledo' ? 'Sanga Puitã' : 'Filial';
         }
 
+        function obterTipoIncrementoTransferencia() {
+            const selecionado = document.querySelector('input[name="tipoIncrementoTransferencia"]:checked');
+            return selecionado ? selecionado.value : 'nenhum';
+        }
+
+        function atualizarIncrementoTransferencia() {
+            const tipo = obterTipoIncrementoTransferencia();
+            const containerUnico = document.getElementById('transferenciaValorUnicoContainer');
+            if (containerUnico) {
+                containerUnico.style.display = tipo === 'unico' ? 'block' : 'none';
+            }
+
+            document.querySelectorAll('.transferenciaValorIndividualContainer').forEach(el => {
+                el.style.display = tipo === 'individual' ? 'block' : 'none';
+            });
+        }
+
+        function obterIncrementoTransferenciaParaItem(item) {
+            const tipo = obterTipoIncrementoTransferencia();
+
+            if (tipo === 'unico') {
+                return Math.max(0, parseFloat(document.getElementById('transferenciaValorUnico')?.value) || 0);
+            }
+
+            if (tipo === 'individual') {
+                return Math.max(0, parseFloat(item.querySelector('.transferenciaValorIndividual')?.value) || 0);
+            }
+
+            return 0;
+        }
+
         function adicionarItemTransferencia() {
             const container = document.getElementById('transferenciaItens');
             if (!container) return;
@@ -3523,13 +3589,16 @@
                 container.innerHTML = '<p style="text-align:center; padding:15px;">Não há pneus disponíveis para transferência neste estoque.</p>';
                 return;
             }
+
             const div = document.createElement('div');
             div.className = 'form-row transferencia-item';
             div.style.cssText = 'align-items:end; margin-bottom:10px; gap:8px;';
+
             const options = estoque.map(e => {
                 const marca = e.marca ? e.marca + ' ' : '';
                 return `<option value="${e.id}">${marca}${e.medida} - ${e.profundidade} (Disponível: ${e.quantidade})</option>`;
             }).join('');
+
             div.innerHTML = `
                 <div class="form-group" style="flex:1; margin:0;">
                     <label>Pneu</label>
@@ -3539,41 +3608,85 @@
                     <label>Quantidade</label>
                     <input type="number" class="transferenciaQuantidade" min="1" value="1" required>
                 </div>
+                <div class="form-group transferenciaValorIndividualContainer" style="flex:0 0 180px; margin:0; display:none;">
+                    <label>Acréscimo por unidade</label>
+                    <div style="display:flex; align-items:center; gap:5px;">
+                        <span style="font-weight:600;">R$</span>
+                        <input type="number" class="transferenciaValorIndividual" min="0" step="0.01" value="0" placeholder="0,00">
+                    </div>
+                </div>
                 <button type="button" class="btn btn-danger" onclick="this.closest('.transferencia-item').remove()">✕</button>
             `;
+
             container.appendChild(div);
+            atualizarIncrementoTransferencia();
         }
 
         document.getElementById('formTransferenciaEstoque').addEventListener('submit', async function(e) {
             e.preventDefault();
+
             const origem = filialAtual;
             const destino = document.getElementById('transferenciaDestino').value;
+
             if (!destino || destino === origem) {
                 alert('Selecione um estoque de destino diferente do estoque atual.');
                 return;
+            }
+
+            const tipoIncremento = obterTipoIncrementoTransferencia();
+
+            if (tipoIncremento === 'unico') {
+                const valorUnico = parseFloat(document.getElementById('transferenciaValorUnico').value) || 0;
+                if (valorUnico < 0) {
+                    alert('O valor único não pode ser negativo.');
+                    return;
+                }
             }
 
             const itens = [];
             document.querySelectorAll('.transferencia-item').forEach(item => {
                 const pneuId = parseInt(item.querySelector('.transferenciaPneu').value);
                 const quantidade = parseInt(item.querySelector('.transferenciaQuantidade').value);
-                if (pneuId && quantidade > 0) itens.push({ pneuId, quantidade });
+                const incremento = obterIncrementoTransferenciaParaItem(item);
+
+                if (pneuId && quantidade > 0) {
+                    itens.push({ pneuId, quantidade, incremento });
+                }
             });
+
             if (itens.length === 0) {
                 alert('Adicione pelo menos um pneu à transferência.');
                 return;
             }
 
-            // Agrupar itens repetidos para evitar movimentar duas vezes o mesmo produto.
+            // Agrupar somente itens com o mesmo pneu e o mesmo acréscimo.
+            // Isso mantém diferentes valores individuais separados quando necessário.
             const agrupados = {};
-            itens.forEach(item => agrupados[item.pneuId] = (agrupados[item.pneuId] || 0) + item.quantidade);
+            itens.forEach(item => {
+                const chave = `${item.pneuId}|${item.incremento.toFixed(2)}`;
+                if (!agrupados[chave]) {
+                    agrupados[chave] = {
+                        pneuId: item.pneuId,
+                        quantidade: 0,
+                        incremento: item.incremento
+                    };
+                }
+                agrupados[chave].quantidade += item.quantidade;
+            });
+
             const estoqueOrigem = dados[origem].estoque;
             const estoqueDestino = dados[destino].estoque;
             const entradasOrigem = dados[origem].entradas;
             const entradasDestino = dados[destino].entradas;
             const agora = new Date().toISOString();
 
-            for (const [idStr, quantidade] of Object.entries(agrupados)) {
+            // Validar tudo antes de alterar qualquer estoque.
+            const quantidadePorPneu = {};
+            Object.values(agrupados).forEach(item => {
+                quantidadePorPneu[item.pneuId] = (quantidadePorPneu[item.pneuId] || 0) + item.quantidade;
+            });
+
+            for (const [idStr, quantidade] of Object.entries(quantidadePorPneu)) {
                 const pneuOrigem = estoqueOrigem.find(e => e.id === parseInt(idStr));
                 if (!pneuOrigem) {
                     alert('Um dos pneus selecionados não foi encontrado no estoque de origem.');
@@ -3585,46 +3698,78 @@
                 }
             }
 
-            for (const [idStr, quantidade] of Object.entries(agrupados)) {
-                const pneuOrigem = estoqueOrigem.find(e => e.id === parseInt(idStr));
+            for (const itemTransferencia of Object.values(agrupados)) {
+                const quantidade = itemTransferencia.quantidade;
+                const incremento = itemTransferencia.incremento;
+                const pneuOrigem = estoqueOrigem.find(e => e.id === itemTransferencia.pneuId);
+
                 const marca = pneuOrigem.marca || '';
                 const medida = pneuOrigem.medida;
                 const profundidade = pneuOrigem.profundidade;
                 const produtoDestino = estoqueDestino.find(e =>
-                    (e.marca || '') === marca && e.medida === medida && e.profundidade === profundidade
+                    (e.marca || '') === marca &&
+                    e.medida === medida &&
+                    e.profundidade === profundidade
                 );
 
+                // O custo da origem não é alterado pelo acréscimo.
                 pneuOrigem.quantidade -= quantidade;
 
+                // Custo unitário efetivo que chegará ao destino.
+                const valorOrigemUnitario = parseFloat(pneuOrigem.valorCompra) || 0;
+                const valorTransferidoUnitario = parseFloat((valorOrigemUnitario + incremento).toFixed(2));
+
                 if (produtoDestino) {
-                    // O custo unitário permanece o mesmo; a transferência não cria custo.
-                    const qtdAtual = produtoDestino.quantidade;
-                    const valorAtual = produtoDestino.valorCompra || 0;
-                    const valorTransferido = pneuOrigem.valorCompra || 0;
+                    const qtdAtual = parseFloat(produtoDestino.quantidade) || 0;
+                    const valorAtual = parseFloat(produtoDestino.valorCompra) || 0;
                     const qtdFinal = qtdAtual + quantidade;
+
+                    // Mantém o cálculo de valor médio no destino, agora considerando o custo adicional.
                     produtoDestino.valorCompra = qtdFinal > 0
-                        ? parseFloat(((qtdAtual * valorAtual + quantidade * valorTransferido) / qtdFinal).toFixed(2))
+                        ? parseFloat(((qtdAtual * valorAtual + quantidade * valorTransferidoUnitario) / qtdFinal).toFixed(2))
                         : 0;
-                    if (pneuOrigem.valorUSD !== undefined) produtoDestino.valorUSD = produtoDestino.valorCompra && pneuOrigem.cotacaoUsada ? parseFloat((produtoDestino.valorCompra / pneuOrigem.cotacaoUsada).toFixed(2)) : produtoDestino.valorUSD;
+
+                    if (produtoDestino.moedaOriginal === 'USD' || pneuOrigem.moedaOriginal === 'USD' || pneuOrigem.valorUSD !== undefined) {
+                        const cotacao = parseFloat(pneuOrigem.cotacaoUsada) || parseFloat(getCotacao().valor) || 0;
+                        if (cotacao > 0) {
+                            produtoDestino.valorUSD = parseFloat((produtoDestino.valorCompra / cotacao).toFixed(2));
+                            produtoDestino.cotacaoUsada = cotacao;
+                        }
+                    }
+
                     produtoDestino.quantidade = qtdFinal;
                 } else {
                     const novo = JSON.parse(JSON.stringify(pneuOrigem));
                     novo.id = dados[destino].nextEstoqueId++;
                     novo.quantidade = quantidade;
+                    novo.valorCompra = valorTransferidoUnitario;
+
+                    const cotacao = parseFloat(pneuOrigem.cotacaoUsada) || parseFloat(getCotacao().valor) || 0;
+                    if (cotacao > 0) {
+                        novo.valorUSD = parseFloat((valorTransferidoUnitario / cotacao).toFixed(2));
+                        novo.cotacaoUsada = cotacao;
+                    }
+
+                    novo.moeda = 'BRL';
+                    novo.moedaOriginal = 'BRL';
                     estoqueDestino.push(novo);
                 }
 
                 const descricao = `${marca ? marca + ' ' : ''}${medida} - ${profundidade}`;
                 const registroBase = {
                     quantidade,
-                    valorUnitario: 0,
+                    valorUnitario: valorTransferidoUnitario,
+                    valorUnitarioOrigem: valorOrigemUnitario,
+                    incrementoValor: incremento,
                     valorUSD: 0,
                     moeda: 'BRL',
                     moedaOriginal: 'BRL',
                     cotacaoUsada: null,
                     data: agora,
                     tipo: 'transferencia',
-                    descricao: 'Transferência de estoque',
+                    descricao: incremento > 0
+                        ? `Transferência de estoque + acréscimo de R$ ${incremento.toFixed(2)} por unidade`
+                        : 'Transferência de estoque',
                     produtoDescricao: descricao,
                     estoqueOrigem: origem,
                     estoqueDestino: destino,
@@ -3632,14 +3777,31 @@
                     destinoNome: nomeFilial(destino),
                     pneuIdOrigem: pneuOrigem.id
                 };
-                entradasOrigem.push({ id: dados[origem].nextEntradaId++, ...registroBase, operacao: 'saida' });
-                entradasDestino.push({ id: dados[destino].nextEntradaId++, ...registroBase, operacao: 'entrada' });
+
+                entradasOrigem.push({
+                    id: dados[origem].nextEntradaId++,
+                    ...registroBase,
+                    operacao: 'saida'
+                });
+
+                entradasDestino.push({
+                    id: dados[destino].nextEntradaId++,
+                    ...registroBase,
+                    operacao: 'entrada'
+                });
             }
 
             closeModal('modalTransferenciaEstoque');
             await salvarDadosFirebase();
             carregarTudo();
-            alert(`Transferência concluída: ${nomeFilial(origem)} → ${nomeFilial(destino)}.`);
+
+            const tipoMensagem = tipoIncremento === 'unico'
+                ? ' com acréscimo de valor único'
+                : tipoIncremento === 'individual'
+                    ? ' com acréscimos individuais'
+                    : '';
+
+            alert(`Transferência concluída: ${nomeFilial(origem)} → ${nomeFilial(destino)}${tipoMensagem}.`);
         });
 
         function loadEstoque() {
