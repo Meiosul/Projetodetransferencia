@@ -2783,7 +2783,13 @@
         }
 
         function isAdmin() {
-            return usuarioLogado && usuarioLogado.username === 'Alexandre';
+            // O administrador é identificado pelo cargo e, por compatibilidade,
+            // pelo usuário principal Alexandre. Assim, as permissões não dependem
+            // exclusivamente do nome de login.
+            return !!(usuarioLogado && (
+                usuarioLogado.username === 'Alexandre' ||
+                String(usuarioLogado.role || '').trim().toLowerCase() === 'administrador'
+            ));
         }
 
         function aplicarPermissoesUsuario() {
@@ -2911,7 +2917,7 @@
 
                 const roleSpan = document.getElementById('currentUserRole');
                 roleSpan.textContent = user.role;
-                if (user.username === 'Alexandre') {
+                if (user.username === 'Alexandre' || String(user.role || '').trim().toLowerCase() === 'administrador') {
                     roleSpan.className = 'user-role admin';
                 } else {
                     roleSpan.className = 'user-role';
@@ -6742,7 +6748,7 @@
 
             let html = '';
             usuarios.forEach((user) => {
-                const isAdminUserAccount = user.username === 'Alexandre';
+                const isAdminUserAccount = user.username === 'Alexandre' || String(user.role || '').trim().toLowerCase() === 'administrador';
                 const isCurrentUserAccount = isCurrentUser(user.username);
 
                 html += `
