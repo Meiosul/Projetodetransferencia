@@ -1552,9 +1552,9 @@
                     </select>
                 </div>
                 <div style="display:flex; gap:10px; flex-wrap:wrap;">
-                    <button class="btn btn-primary" onclick="openModal('modalEstoque')">+ Adicionar Pneu</button>
+                    <button id="btnAdicionarPneu" class="btn btn-primary" onclick="openModal('modalEstoque')">+ Adicionar Pneu</button>
                     <button class="btn btn-success" onclick="openModal('modalTransferenciaEstoque')">↔️ Transferência de estoque</button>
-                    <button class="btn btn-historico" onclick="abrirHistoricoEstoque()">📜 Histórico</button>
+                    <button id="btnHistoricoEstoque" class="btn btn-historico" onclick="abrirHistoricoEstoque()">📜 Histórico</button>
                 </div>
             </div>
             <div id="estoqueTable"></div>
@@ -2786,6 +2786,16 @@
             return usuarioLogado && usuarioLogado.username === 'Alexandre';
         }
 
+        function aplicarPermissoesUsuario() {
+            const admin = isAdmin();
+            ['btnAdicionarPneu', 'btnHistoricoEstoque'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.style.display = admin ? '' : 'none';
+            });
+            if (typeof loadEstoque === 'function') loadEstoque();
+            if (typeof loadVendas === 'function') loadVendas();
+        }
+
         function isCurrentUser(username) {
             return usuarioLogado && usuarioLogado.username === username;
         }
@@ -2915,6 +2925,7 @@
                 document.getElementById('tabRelatorios').style.display = isAdminUser ? '' : 'none';
 
                 carregarTudo();
+                setTimeout(aplicarPermissoesUsuario, 0);
             } else {
                 document.getElementById('loginError').textContent = 'Usuário ou senha inválidos!';
                 document.getElementById('loginError').style.display = 'block';
@@ -3074,6 +3085,8 @@
         // INCLUIR ESTOQUE
         // =========================================================================
         function abrirModalIncluir(id) {
+            if (!isAdmin()) { alert('Apenas o administrador pode incluir unidades no estoque.'); return; }
+
             produtoIncluirId = id;
             
             const estoque = getEstoque();
@@ -3240,6 +3253,8 @@
         // ALTERAR ESTOQUE
         // =========================================================================
         function abrirModalAlterar(id) {
+            if (!isAdmin()) { alert('Apenas o administrador pode alterar produtos do estoque.'); return; }
+
             produtoAlterarId = id;
             
             const estoque = getEstoque();
@@ -3748,19 +3763,37 @@
                 // O custo da origem não é alterado pelo acréscimo.
                 pneuOrigem.quantidade -= quantidade;
 
-                // Custo unitário efetivo que chegará ao destino.
+                // Valores unitários efetivos que chegarão ao destino.
+                // O acréscimo informado na transferência aumenta tanto o custo
+                // quanto o valor de venda e o valor mínimo de venda da carga transferida.
                 const valorOrigemUnitario = parseFloat(pneuOrigem.valorCompra) || 0;
                 const valorTransferidoUnitario = parseFloat((valorOrigemUnitario + incremento).toFixed(2));
+                const valorVendaOrigem = parseFloat(pneuOrigem.valorVenda) || 0;
+                const valorVendaTransferido = parseFloat((valorVendaOrigem + incremento).toFixed(2));
+                const valorMinimoVendaOrigem = parseFloat(pneuOrigem.valorMinimoVenda) || 0;
+                const valorMinimoVendaTransferido = parseFloat((valorMinimoVendaOrigem + incremento).toFixed(2));
 
                 if (produtoDestino) {
                     const qtdAtual = parseFloat(produtoDestino.quantidade) || 0;
                     const valorAtual = parseFloat(produtoDestino.valorCompra) || 0;
+                    const valorVendaAtual = parseFloat(produtoDestino.valorVenda) || 0;
+                    const valorMinimoVendaAtual = parseFloat(produtoDestino.valorMinimoVenda) || 0;
                     const qtdFinal = qtdAtual + quantidade;
 
-                    // Mantém o cálculo de valor médio no destino, agora considerando o custo adicional.
+                    // Calcula a média ponderada no destino considerando o acréscimo.
                     produtoDestino.valorCompra = qtdFinal > 0
                         ? parseFloat(((qtdAtual * valorAtual + quantidade * valorTransferidoUnitario) / qtdFinal).toFixed(2))
                         : 0;
+
+                    // O valor de venda também passa a ser uma média ponderada.
+                    produtoDestino.valorVenda = qtdFinal > 0
+                        ? parseFloat(((qtdAtual * valorVendaAtual + quantidade * valorVendaTransferido) / qtdFinal).toFixed(2))
+                        : valorVendaTransferido;
+
+                    // Mantém o valor mínimo de venda coerente com a carga transferida.
+                    produtoDestino.valorMinimoVenda = qtdFinal > 0
+                        ? parseFloat(((qtdAtual * valorMinimoVendaAtual + quantidade * valorMinimoVendaTransferido) / qtdFinal).toFixed(2))
+                        : valorMinimoVendaTransferido;
 
                     if (produtoDestino.moedaOriginal === 'USD' || pneuOrigem.moedaOriginal === 'USD' || pneuOrigem.valorUSD !== undefined) {
                         const cotacao = parseFloat(pneuOrigem.cotacaoUsada) || parseFloat(getCotacao().valor) || 0;
@@ -3776,6 +3809,8 @@
                     novo.id = dados[destino].nextEstoqueId++;
                     novo.quantidade = quantidade;
                     novo.valorCompra = valorTransferidoUnitario;
+                    novo.valorVenda = valorVendaTransferido;
+                    novo.valorMinimoVenda = valorMinimoVendaTransferido;
 
                     const cotacao = parseFloat(pneuOrigem.cotacaoUsada) || parseFloat(getCotacao().valor) || 0;
                     if (cotacao > 0) {
@@ -3793,6 +3828,10 @@
                     quantidade,
                     valorUnitario: valorTransferidoUnitario,
                     valorUnitarioOrigem: valorOrigemUnitario,
+                    valorVendaUnitario: valorVendaTransferido,
+                    valorVendaUnitarioOrigem: valorVendaOrigem,
+                    valorMinimoVendaUnitario: valorMinimoVendaTransferido,
+                    valorMinimoVendaUnitarioOrigem: valorMinimoVendaOrigem,
                     incrementoValor: incremento,
                     valorUSD: 0,
                     moeda: 'BRL',
@@ -3889,12 +3928,13 @@
                 const totalValor = items.reduce((sum, e) => sum + (e.quantidade * e.valorCompra), 0);
                 const valorMedio = totalQtd > 0 ? totalValor / totalQtd : 0;
 
+                const adminEstoque = isAdmin();
                 html += `
                     <div class="grupo-estoque">
                         <div class="grupo-header" onclick="toggleGrupo(this)">
                             <h3>📦 ${chave}</h3>
                             <div class="grupo-total">
-                                ${totalQtd} unid. | Valor médio: R$ ${valorMedio.toFixed(2)} | Total: R$ ${totalValor.toFixed(2)}
+                                ${totalQtd} unid. | ${adminEstoque ? `Valor médio: R$ ${valorMedio.toFixed(2)} | ` : ''}Total: R$ ${totalValor.toFixed(2)}
                             </div>
                         </div>
                         <div class="grupo-body">
@@ -3983,6 +4023,8 @@
         }
 
         async function removerEstoque(id) {
+            if (!isAdmin()) { alert('Apenas o administrador pode remover produtos do estoque.'); return; }
+
             if (confirm('Tem certeza que deseja remover este pneu do estoque?')) {
                 const estoque = getEstoque();
                 const index = estoque.findIndex(item => item.id === id);
@@ -4045,6 +4087,8 @@
         // HISTÓRICO DE VENDAS POR PNEU
         // =========================================================================
         function abrirHistoricoEstoque(pneuId) {
+            if (!isAdmin()) { alert('Apenas o administrador pode acessar o histórico do estoque.'); return; }
+
             const container = document.getElementById('historicoEstoqueContent');
             if (!container) return;
             
@@ -4682,8 +4726,8 @@
                     <td>${new Date(venda.data).toLocaleDateString('pt-BR')}</td>
                     <td style="white-space:nowrap;">
                         <button class="btn-acao btn-info" onclick="verPedidoVenda(${venda.id})">📋 Ver</button>
-                        <button class="btn-acao btn-danger" onclick="cancelarVenda(${venda.id})">↩️ Cancelar</button>
-                        <button class="btn-acao btn-excluir-sem-retorno" onclick="excluirVendaSemRetorno(${venda.id})">🗑️ Excluir</button>
+                        ${isAdmin() ? `<button class="btn-acao btn-danger" onclick="cancelarVenda(${venda.id})">↩️ Cancelar</button>
+                        <button class="btn-acao btn-excluir-sem-retorno" onclick="excluirVendaSemRetorno(${venda.id})">🗑️ Excluir</button>` : ''}
                     </td>
                 </tr>`;
             });
@@ -4697,6 +4741,8 @@
         }
 
         async function cancelarVenda(id) {
+            if (!isAdmin()) { alert('Apenas o administrador pode cancelar vendas.'); return; }
+
             if (confirm('Tem certeza que deseja cancelar esta venda? (Os produtos voltarão ao estoque)')) {
                 const vendas = getVendas();
                 const venda = vendas.find(v => v.id === id);
@@ -4728,6 +4774,8 @@
         }
 
         async function excluirVendaSemRetorno(id) {
+            if (!isAdmin()) { alert('Apenas o administrador pode excluir vendas.'); return; }
+
             if (confirm('⚠️ ATENÇÃO: Esta ação irá EXCLUIR a venda PERMANENTEMENTE sem devolver os produtos ao estoque. Deseja continuar?')) {
                 const vendas = getVendas();
                 const venda = vendas.find(v => v.id === id);
