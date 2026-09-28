@@ -18,7 +18,7 @@
     </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js">
     </script>
-    // teste//
+    
     <style>
         /* ===== ESTILOS GERAIS ===== */
         * {
@@ -1532,6 +1532,7 @@
             <button class="tab-btn" data-tab="despesas" id="tabDespesas">💸 Despesas</button>
             <button class="tab-btn" data-tab="relatorios" id="tabRelatorios">📊 Relatórios</button>
             <button class="tab-btn" data-tab="pedidos">📋 Pedidos</button>
+            <button class="tab-btn" data-tab="carteira" id="tabCarteira">💳 Carteira</button>
             <button class="tab-btn" data-tab="contas" id="tabContas">⚙️ Contas</button>
         </div>
 
@@ -1570,6 +1571,7 @@
                         <option value="Cartão">Cartão</option>
                         <option value="Pix">Pix</option>
                         <option value="Cheque">Cheque</option>
+                        <option value="Carteira">Carteira</option>
                     </select>
                     <select id="filterVendasVendedor" onchange="filterVendas()">
                         <option value="">Todos Vendedores</option>
@@ -1730,6 +1732,30 @@
                 <button class="btn btn-info" onclick="carregarPedidos()">🔄 Atualizar</button>
             </div>
             <div id="pedidosList"></div>
+        </div>
+
+        <!-- ==================== ABA CARTEIRA ==================== -->
+        <div class="tab-content" id="carteira">
+            <div class="header-actions">
+                <div>
+                    <h2 style="margin:0;">💳 Carteira / Contas a Receber</h2>
+                    <p style="margin:5px 0 0; color:#666;">Valores de vendas que ficaram pendentes de pagamento.</p>
+                </div>
+                <div class="search-box">
+                    <input type="text" id="searchCarteira" placeholder="Buscar cliente, vendedor ou pedido..." oninput="loadCarteira()">
+                    <select id="filterCarteiraStatus" onchange="loadCarteira()">
+                        <option value="aberto">Pendentes</option>
+                        <option value="todos">Todos</option>
+                        <option value="pago">Pagos</option>
+                    </select>
+                </div>
+            </div>
+            <div class="stats-grid" style="margin-bottom:20px;">
+                <div class="stat-card"><div class="label">Pendentes</div><div class="value" id="carteiraQtdPendente">0</div></div>
+                <div class="stat-card"><div class="label">A Receber</div><div class="value" id="carteiraTotalPendente">R$ 0,00</div></div>
+                <div class="stat-card"><div class="label">Pagos</div><div class="value" id="carteiraTotalPago">R$ 0,00</div></div>
+            </div>
+            <div id="carteiraTable"></div>
         </div>
 
         <!-- ==================== ABA CONTAS ==================== -->
@@ -2045,6 +2071,7 @@
                                 <option value="Cartão">Cartão</option>
                                 <option value="Pix">Pix</option>
                                 <option value="Cheque">Cheque</option>
+                                <option value="Carteira">Carteira</option>
                             </select>
                             <input type="number" class="vendaValorPagamento" placeholder="Valor" step="0.01" required>
                             <div class="chequeFields" style="display:none;">
@@ -2302,11 +2329,13 @@
                 entradas: [],
                 pedidos: [],
                 despesas: [],
+                carteira: [],
                 nextEstoqueId: 1,
                 nextVendaId: 1,
                 nextPedidoId: 1,
                 nextEntradaId: 1,
                 nextDespesaId: 1,
+                nextCarteiraId: 1,
                 cotacao: { valor: 0, data: '' }
             },
             filial: {
@@ -2315,11 +2344,13 @@
                 entradas: [],
                 pedidos: [],
                 despesas: [],
+                carteira: [],
                 nextEstoqueId: 1,
                 nextVendaId: 1,
                 nextPedidoId: 1,
                 nextEntradaId: 1,
                 nextDespesaId: 1,
+                nextCarteiraId: 1,
                 cotacao: { valor: 0, data: '' }
             }
         };
@@ -2452,6 +2483,19 @@
         }
 
         // =========================================================================
+        // NORMALIZAÇÃO DA CARTEIRA
+        // =========================================================================
+        function normalizarCarteiraDados() {
+            ['toledo', 'filial'].forEach(filial => {
+                if (!dados[filial]) dados[filial] = {};
+                if (!Array.isArray(dados[filial].carteira)) dados[filial].carteira = [];
+                const maiorId = dados[filial].carteira.reduce((max, item) => Math.max(max, parseInt(item.id) || 0), 0);
+                const atual = parseInt(dados[filial].nextCarteiraId) || 1;
+                dados[filial].nextCarteiraId = Math.max(atual, maiorId + 1);
+            });
+        }
+
+        // =========================================================================
         // FUNÇÕES DO FIREBASE
         // =========================================================================
         function configurarListeners() {
@@ -2487,10 +2531,12 @@
                 const unsubDados = db.collection('dados').doc(filial).onSnapshot((snapshot) => {
                     if (snapshot.exists) {
                         dados[filial] = snapshot.data();
+                        normalizarCarteiraDados();
                         if (dadosCarregados && filial === filialAtual) {
                             loadEstoque();
                             loadVendas();
                             loadDespesas();
+                            loadCarteira();
                             carregarPedidos();
                             atualizarBadges();
                             atualizarStatsDespesas();
@@ -2536,6 +2582,7 @@
                     }
                 }
 
+                normalizarCarteiraDados();
                 dadosCarregados = true;
                 statusEl.textContent = '🟢 Online';
                 statusEl.className = 'online-status online';
@@ -2556,6 +2603,7 @@
                         clientes = parsed.clientes || clientes;
                         usuarios = parsed.usuarios || usuarios;
                         dados = parsed.dados || dados;
+                        normalizarCarteiraDados();
                         dadosCarregados = true;
                         
                         document.getElementById('onlineStatus').textContent = '🟡 Offline (cache)';
@@ -2654,6 +2702,12 @@
             return getDadosFilial().despesas;
         }
 
+        function getCarteira() {
+            const d = getDadosFilial();
+            if (!Array.isArray(d.carteira)) d.carteira = [];
+            return d.carteira;
+        }
+
         function getNextId(tipo) {
             const d = getDadosFilial();
             if (tipo === 'estoque') return d.nextEstoqueId++;
@@ -2661,6 +2715,7 @@
             if (tipo === 'pedido') return d.nextPedidoId++;
             if (tipo === 'entrada') return d.nextEntradaId++;
             if (tipo === 'despesa') return d.nextDespesaId++;
+            if (tipo === 'carteira') return d.nextCarteiraId++;
         }
 
         function isAdmin() {
@@ -2852,6 +2907,7 @@
             loadVendas();
             loadClientes();
             loadDespesas();
+            loadCarteira();
             loadRelatorioClientes();
             loadRelatorioMarcas();
             loadRelatorioMedidas();
@@ -3999,6 +4055,7 @@
                     <option value="Cartão">Cartão</option>
                     <option value="Pix">Pix</option>
                     <option value="Cheque">Cheque</option>
+                    <option value="Carteira">Carteira</option>
                 </select>
                 <input type="number" class="vendaValorPagamento" placeholder="Valor" step="0.01" required>
                 <div class="chequeFields" style="display:none;">
@@ -4173,9 +4230,27 @@
                 totalPagamentos += valor;
             }
 
-            if (Math.abs(totalPagamentos - totalVendaBRL) > 0.01) {
-                alert(`O total dos pagamentos (R$ ${totalPagamentos.toFixed(2)}) não corresponde ao total da venda (R$ ${totalVendaBRL.toFixed(2)}).`);
+            if (totalPagamentos > totalVendaBRL + 0.01) {
+                alert(`O total dos pagamentos (R$ ${totalPagamentos.toFixed(2)}) não pode ser maior que o total da venda (R$ ${totalVendaBRL.toFixed(2)}).`);
                 return;
+            }
+
+            const valorCarteira = pagamentos
+                .filter(p => p.metodo === 'Carteira')
+                .reduce((sum, p) => sum + p.valor, 0);
+
+            if (Math.abs(totalPagamentos - totalVendaBRL) > 0.01 && valorCarteira <= 0) {
+                alert(`Falta informar R$ ${(totalVendaBRL - totalPagamentos).toFixed(2)}. Use a forma de pagamento Carteira para registrar o restante a pagar.`);
+                return;
+            }
+
+            if (Math.abs((totalPagamentos + 0) - totalVendaBRL) > 0.01 && valorCarteira > 0) {
+                // A soma dos pagamentos precisa fechar a venda; a Carteira representa exatamente o saldo em aberto.
+                const saldoCarteira = totalVendaBRL - (totalPagamentos - valorCarteira);
+                if (Math.abs(valorCarteira - saldoCarteira) > 0.01) {
+                    alert(`O valor da Carteira deve ser exatamente o restante da venda: R$ ${saldoCarteira.toFixed(2)}.`);
+                    return;
+                }
             }
 
             // ATUALIZAR ESTOQUE - REMOVER QUANTIDADE VENDIDA
@@ -4205,6 +4280,29 @@
 
             vendas.push(venda);
 
+            if (valorCarteira > 0) {
+                const carteira = getCarteira();
+                const registroCarteira = {
+                    id: getNextId('carteira'),
+                    vendaId: venda.id,
+                    clienteId: venda.clienteId,
+                    vendedor: venda.vendedor,
+                    local: venda.local,
+                    pedidoNumero: null,
+                    valor: parseFloat(valorCarteira.toFixed(2)),
+                    status: 'aberto',
+                    data: venda.data,
+                    dataBaixa: null,
+                    metodoBaixa: null,
+                    usuarioBaixa: null,
+                    filial: filialAtual
+                };
+                carteira.push(registroCarteira);
+                venda.pagamentos.forEach(p => {
+                    if (p.metodo === 'Carteira') p.carteiraId = registroCarteira.id;
+                });
+            }
+
             const pedidos = getPedidos();
             const pedido = {
                 id: getNextId('pedido'),
@@ -4223,6 +4321,8 @@
             };
 
             pedidos.push(pedido);
+            const carteiraVenda = getCarteira().filter(c => c.vendaId === venda.id);
+            carteiraVenda.forEach(c => c.pedidoNumero = pedido.numero);
 
             closeModal('modalVenda');
 
@@ -4266,6 +4366,7 @@
             await salvarDadosFirebase();
             
             loadVendas();
+            loadCarteira();
             carregarPedidos();
             loadEstoque();
             atualizarBadges();
@@ -4318,7 +4419,7 @@
                 }).join(', ');
 
                 const pagamentosStr = venda.pagamentos.map(p =>
-                    `${p.metodo} R$ ${p.valor.toFixed(2)}${p.metodo === 'Cheque' ? ` (${p.chequeNome})` : ''}`
+                    `${p.metodo} R$ ${p.valor.toFixed(2)}${p.metodo === 'Cheque' ? ` (${p.chequeNome})` : ''}${p.metodo === 'Carteira' && p.status === 'pago' ? ' (pago)' : ''}`
                 ).join(', ');
 
                 let moedaDisplay = 'BRL';
@@ -4368,6 +4469,7 @@
                     const index = vendas.indexOf(venda);
                     if (index !== -1) {
                         vendas.splice(index, 1);
+                        getCarteira().splice(0, getCarteira().length, ...getCarteira().filter(c => c.vendaId !== id));
                         const pedidos = getPedidos();
                         const pedidoIndex = pedidos.findIndex(p => p.vendaId === id);
                         if (pedidoIndex !== -1) pedidos.splice(pedidoIndex, 1);
@@ -4393,6 +4495,7 @@
                     const index = vendas.indexOf(venda);
                     if (index !== -1) {
                         vendas.splice(index, 1);
+                        getCarteira().splice(0, getCarteira().length, ...getCarteira().filter(c => c.vendaId !== id));
                         const pedidos = getPedidos();
                         const pedidoIndex = pedidos.findIndex(p => p.vendaId === id);
                         if (pedidoIndex !== -1) pedidos.splice(pedidoIndex, 1);
@@ -5572,6 +5675,96 @@
         }
 
         // =========================================================================
+        // CARTEIRA / CONTAS A RECEBER
+        // =========================================================================
+        function loadCarteira() {
+            const container = document.getElementById('carteiraTable');
+            if (!container) return;
+            const carteira = getCarteira();
+            const busca = document.getElementById('searchCarteira')?.value.toLowerCase() || '';
+            const statusFiltro = document.getElementById('filterCarteiraStatus')?.value || 'aberto';
+
+            const pendentes = carteira.filter(c => c.status !== 'pago');
+            const pagos = carteira.filter(c => c.status === 'pago');
+            const totalPendente = pendentes.reduce((s,c) => s + (parseFloat(c.valor)||0), 0);
+            const totalPago = pagos.reduce((s,c) => s + (parseFloat(c.valor)||0), 0);
+            const qtdEl = document.getElementById('carteiraQtdPendente');
+            const totalEl = document.getElementById('carteiraTotalPendente');
+            const pagoEl = document.getElementById('carteiraTotalPago');
+            if (qtdEl) qtdEl.textContent = pendentes.length;
+            if (totalEl) totalEl.textContent = `R$ ${totalPendente.toFixed(2)}`;
+            if (pagoEl) pagoEl.textContent = `R$ ${totalPago.toFixed(2)}`;
+
+            const filtrados = carteira.filter(c => {
+                const cliente = clientes.find(x => x.id === c.clienteId);
+                const nomeCliente = cliente ? `${cliente.nome || ''} ${cliente.sobrenome || ''}`.toLowerCase() : '';
+                const pedido = (c.pedidoNumero || '').toLowerCase();
+                const vendedor = (c.vendedor || '').toLowerCase();
+                const matchBusca = !busca || nomeCliente.includes(busca) || pedido.includes(busca) || vendedor.includes(busca);
+                const matchStatus = statusFiltro === 'todos' || (statusFiltro === 'pago' ? c.status === 'pago' : c.status !== 'pago');
+                return matchBusca && matchStatus;
+            }).sort((a,b) => {
+                if (a.status !== b.status) return a.status === 'aberto' ? -1 : 1;
+                return new Date(b.data || 0) - new Date(a.data || 0);
+            });
+
+            if (!filtrados.length) {
+                container.innerHTML = '<p style="text-align:center; padding:30px;">Nenhum pagamento encontrado.</p>';
+                return;
+            }
+
+            let html = `<div class="table-responsive"><table><thead><tr>
+                <th>Pedido</th><th>Cliente</th><th>Vendedor</th><th>Valor</th><th>Status</th><th>Data</th><th>Baixa</th><th>Ações</th>
+            </tr></thead><tbody>`;
+            filtrados.forEach(c => {
+                const cliente = clientes.find(x => x.id === c.clienteId);
+                const nomeCliente = cliente ? `${cliente.nome || ''} ${cliente.sobrenome || ''}`.trim() : 'N/A';
+                const pago = c.status === 'pago';
+                html += `<tr>
+                    <td><strong>${c.pedidoNumero || 'PED-' + c.vendaId}</strong></td>
+                    <td>${nomeCliente}</td>
+                    <td>${c.vendedor || 'N/A'}</td>
+                    <td style="font-weight:bold;">R$ ${(parseFloat(c.valor)||0).toFixed(2)}</td>
+                    <td>${pago ? '✅ Pago' : '🟠 Pendente'}</td>
+                    <td>${c.data ? new Date(c.data).toLocaleDateString('pt-BR') : 'N/A'}</td>
+                    <td>${pago ? `${new Date(c.dataBaixa).toLocaleDateString('pt-BR')}<br><small>${c.metodoBaixa || ''}</small>` : '-'}</td>
+                    <td>${!pago ? `<button class="btn btn-success" onclick="darBaixaCarteira(${c.id})">💰 Dar baixa</button>` : '<span style="color:#2e7d32;font-weight:bold;">Quitado</span>'}</td>
+                </tr>`;
+            });
+            html += '</tbody></table></div>';
+            container.innerHTML = html;
+        }
+
+        async function darBaixaCarteira(id) {
+            const carteira = getCarteira();
+            const registro = carteira.find(c => c.id === id);
+            if (!registro || registro.status === 'pago') return;
+            const cliente = clientes.find(c => c.id === registro.clienteId);
+            const nomeCliente = cliente ? `${cliente.nome || ''} ${cliente.sobrenome || ''}`.trim() : 'cliente';
+            if (!confirm(`Confirmar recebimento de R$ ${(parseFloat(registro.valor)||0).toFixed(2)} de ${nomeCliente}?`)) return;
+
+            const venda = getVendas().find(v => v.id === registro.vendaId);
+            if (venda && Array.isArray(venda.pagamentos)) {
+                venda.pagamentos.forEach(p => {
+                    if (p.metodo === 'Carteira' && p.carteiraId === registro.id) {
+                        p.status = 'pago';
+                        p.dataBaixa = new Date().toISOString();
+                        p.metodoBaixa = 'Recebimento da carteira';
+                    }
+                });
+            }
+            registro.status = 'pago';
+            registro.dataBaixa = new Date().toISOString();
+            registro.metodoBaixa = 'Recebimento da carteira';
+            registro.usuarioBaixa = usuarioLogado ? usuarioLogado.nome : '';
+
+            await salvarDadosFirebase();
+            loadCarteira();
+            loadVendas();
+            alert('Pagamento recebido e baixado da carteira com sucesso!');
+        }
+
+        // =========================================================================
         // RELATÓRIOS
         // =========================================================================
         function loadRelatorioClientes() {
@@ -5799,7 +5992,7 @@
                 }).join('; ');
 
                 const pagamentosStr = v.pagamentos.map(p =>
-                    `${p.metodo} R$ ${p.valor.toFixed(2)}`
+                    `${p.metodo} R$ ${p.valor.toFixed(2)}${p.metodo === 'Carteira' && p.status === 'pago' ? ' (pago)' : ''}`
                 ).join(', ');
 
                 html += `<tr>
@@ -6409,6 +6602,7 @@
                 const target = document.getElementById(this.dataset.tab);
                 if (target) target.classList.add('active');
                 if (this.dataset.tab === 'pedidos') carregarPedidos();
+                if (this.dataset.tab === 'carteira') loadCarteira();
                 if (this.dataset.tab === 'contas') carregarContas();
                 if (this.dataset.tab === 'despesas') {
                     loadDespesas();
@@ -6483,9 +6677,11 @@
             dados.toledo.vendas = [];
             dados.toledo.pedidos = [];
             dados.toledo.despesas = [];
+            dados.toledo.carteira = [];
             dados.toledo.nextVendaId = 1;
             dados.toledo.nextPedidoId = 1;
             dados.toledo.nextDespesaId = 1;
+            dados.toledo.nextCarteiraId = 1;
 
             dados.filial.estoque = [
                 { id: 1, marca: 'Goodyear', medida: '275/80 R22.5', profundidade: '07mm', quantidade: 6, valorCompra: 900.00,
@@ -6507,9 +6703,11 @@
             dados.filial.vendas = [];
             dados.filial.pedidos = [];
             dados.filial.despesas = [];
+            dados.filial.carteira = [];
             dados.filial.nextVendaId = 1;
             dados.filial.nextPedidoId = 1;
             dados.filial.nextDespesaId = 1;
+            dados.filial.nextCarteiraId = 1;
             
             dados.toledo.cotacao = { valor: 5.00, data: new Date().toISOString() };
             dados.filial.cotacao = { valor: 5.00, data: new Date().toISOString() };
