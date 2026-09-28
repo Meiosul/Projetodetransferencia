@@ -1758,7 +1758,29 @@
             <div id="carteiraTable"></div>
         </div>
 
-        <!-- ==================== ABA CONTAS ==================== -->
+        <!-- Modal de Recebimento da Carteira -->
+    <div class="modal" id="modalBaixaCarteira">
+        <div class="modal-content" style="max-width:900px;">
+            <div class="modal-header">
+                <h2>💰 Receber pagamento da Carteira</h2>
+                <span class="close" onclick="closeModal('modalBaixaCarteira')">&times;</span>
+            </div>
+            <div id="baixaCarteiraInfo" style="background:#f5f5f5;padding:12px;border-radius:8px;margin-bottom:15px;"></div>
+            <input type="hidden" id="baixaCarteiraId">
+            <div id="baixaPagamentosContainer"></div>
+            <button type="button" class="btn btn-info" onclick="adicionarPagamentoBaixaCarteira()">+ Adicionar forma de pagamento</button>
+            <div style="margin-top:15px;padding:12px;background:#eef7ee;border-radius:8px;">
+                <div><strong>Total desta baixa:</strong> <span id="baixaTotalBRL">R$ 0,00</span></div>
+                <div><strong>Saldo após esta baixa:</strong> <span id="baixaSaldoBRL">R$ 0,00</span></div>
+            </div>
+            <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px;">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('modalBaixaCarteira')">Cancelar</button>
+                <button type="button" class="btn btn-success" onclick="confirmarBaixaCarteira()">💾 Registrar recebimento</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== ABA CONTAS ==================== -->
         <div class="tab-content" id="contas">
             <div class="header-actions">
                 <h2>⚙️ Gerenciamento de Contas</h2>
@@ -5677,6 +5699,15 @@
         // =========================================================================
         // CARTEIRA / CONTAS A RECEBER
         // =========================================================================
+        function getSaldoCarteira(registro) {
+            const valor = parseFloat(registro?.valor) || 0;
+            if (registro && registro.saldoRestanteBRL !== undefined) return Math.max(0, parseFloat(registro.saldoRestanteBRL) || 0);
+            return registro?.status === 'pago' ? 0 : valor;
+        }
+
+        function formatMoneyBRL(v) { return `R$ ${(parseFloat(v)||0).toFixed(2).replace('.', ',')}`; }
+        function formatMoneyUSD(v) { return `US$ ${(parseFloat(v)||0).toFixed(2)}`; }
+
         function loadCarteira() {
             const container = document.getElementById('carteiraTable');
             if (!container) return;
@@ -5684,16 +5715,17 @@
             const busca = document.getElementById('searchCarteira')?.value.toLowerCase() || '';
             const statusFiltro = document.getElementById('filterCarteiraStatus')?.value || 'aberto';
 
-            const pendentes = carteira.filter(c => c.status !== 'pago');
-            const pagos = carteira.filter(c => c.status === 'pago');
-            const totalPendente = pendentes.reduce((s,c) => s + (parseFloat(c.valor)||0), 0);
+            const pendentes = carteira.filter(c => getSaldoCarteira(c) > 0.009);
+            const pagos = carteira.filter(c => getSaldoCarteira(c) <= 0.009);
+            const totalPendente = pendentes.reduce((s,c) => s + getSaldoCarteira(c), 0);
             const totalPago = pagos.reduce((s,c) => s + (parseFloat(c.valor)||0), 0);
+            document.getElementById('carteiraQtdPendente')?.setAttribute('data-value', pendentes.length);
             const qtdEl = document.getElementById('carteiraQtdPendente');
             const totalEl = document.getElementById('carteiraTotalPendente');
             const pagoEl = document.getElementById('carteiraTotalPago');
             if (qtdEl) qtdEl.textContent = pendentes.length;
-            if (totalEl) totalEl.textContent = `R$ ${totalPendente.toFixed(2)}`;
-            if (pagoEl) pagoEl.textContent = `R$ ${totalPago.toFixed(2)}`;
+            if (totalEl) totalEl.textContent = formatMoneyBRL(totalPendente);
+            if (pagoEl) pagoEl.textContent = formatMoneyBRL(totalPago);
 
             const filtrados = carteira.filter(c => {
                 const cliente = clientes.find(x => x.id === c.clienteId);
@@ -5701,67 +5733,196 @@
                 const pedido = (c.pedidoNumero || '').toLowerCase();
                 const vendedor = (c.vendedor || '').toLowerCase();
                 const matchBusca = !busca || nomeCliente.includes(busca) || pedido.includes(busca) || vendedor.includes(busca);
-                const matchStatus = statusFiltro === 'todos' || (statusFiltro === 'pago' ? c.status === 'pago' : c.status !== 'pago');
+                const pago = getSaldoCarteira(c) <= 0.009;
+                const matchStatus = statusFiltro === 'todos' || (statusFiltro === 'pago' ? pago : !pago);
                 return matchBusca && matchStatus;
             }).sort((a,b) => {
-                if (a.status !== b.status) return a.status === 'aberto' ? -1 : 1;
+                const ap = getSaldoCarteira(a) > 0.009, bp = getSaldoCarteira(b) > 0.009;
+                if (ap !== bp) return ap ? -1 : 1;
                 return new Date(b.data || 0) - new Date(a.data || 0);
             });
 
             if (!filtrados.length) {
-                container.innerHTML = '<p style="text-align:center; padding:30px;">Nenhum pagamento encontrado.</p>';
+                container.innerHTML = '<p style="text-align:center;padding:30px;">Nenhum pagamento encontrado.</p>';
                 return;
             }
 
             let html = `<div class="table-responsive"><table><thead><tr>
-                <th>Pedido</th><th>Cliente</th><th>Vendedor</th><th>Valor</th><th>Status</th><th>Data</th><th>Baixa</th><th>Ações</th>
+                <th>Pedido</th><th>Cliente</th><th>Vendedor</th><th>Valor original</th><th>Saldo</th><th>Status</th><th>Data</th><th>Baixa</th><th>Ações</th>
             </tr></thead><tbody>`;
             filtrados.forEach(c => {
                 const cliente = clientes.find(x => x.id === c.clienteId);
                 const nomeCliente = cliente ? `${cliente.nome || ''} ${cliente.sobrenome || ''}`.trim() : 'N/A';
-                const pago = c.status === 'pago';
+                const saldo = getSaldoCarteira(c);
+                const pago = saldo <= 0.009;
+                const historico = Array.isArray(c.baixas) ? c.baixas : [];
+                const ultima = historico.length ? historico[historico.length - 1] : null;
                 html += `<tr>
                     <td><strong>${c.pedidoNumero || 'PED-' + c.vendaId}</strong></td>
                     <td>${nomeCliente}</td>
                     <td>${c.vendedor || 'N/A'}</td>
-                    <td style="font-weight:bold;">R$ ${(parseFloat(c.valor)||0).toFixed(2)}</td>
+                    <td style="font-weight:bold;">${formatMoneyBRL(c.valor)}</td>
+                    <td style="font-weight:bold;color:${pago ? '#2e7d32' : '#c62828'};">${formatMoneyBRL(saldo)}</td>
                     <td>${pago ? '✅ Pago' : '🟠 Pendente'}</td>
                     <td>${c.data ? new Date(c.data).toLocaleDateString('pt-BR') : 'N/A'}</td>
-                    <td>${pago ? `${new Date(c.dataBaixa).toLocaleDateString('pt-BR')}<br><small>${c.metodoBaixa || ''}</small>` : '-'}</td>
-                    <td>${!pago ? `<button class="btn btn-success" onclick="darBaixaCarteira(${c.id})">💰 Dar baixa</button>` : '<span style="color:#2e7d32;font-weight:bold;">Quitado</span>'}</td>
+                    <td>${ultima ? `${new Date(ultima.data).toLocaleDateString('pt-BR')}<br><small>${ultima.resumo || ''}</small>` : '-'}</td>
+                    <td>${!pago ? `<button class="btn btn-success" onclick="darBaixaCarteira(${c.id})">💰 Receber</button>` : '<span style="color:#2e7d32;font-weight:bold;">Quitado</span>'}</td>
                 </tr>`;
             });
             html += '</tbody></table></div>';
             container.innerHTML = html;
         }
 
-        async function darBaixaCarteira(id) {
-            const carteira = getCarteira();
-            const registro = carteira.find(c => c.id === id);
-            if (!registro || registro.status === 'pago') return;
+        function criarLinhaBaixaCarteira() {
+            const div = document.createElement('div');
+            div.className = 'baixa-pagamento-item';
+            div.style.cssText = 'border:1px solid #ddd;border-radius:8px;padding:12px;margin:10px 0;background:#fff;';
+            div.innerHTML = `
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end;">
+                    <div class="form-group"><label>Forma de pagamento</label>
+                        <select class="baixaMetodo" onchange="toggleCamposBaixaCarteira(this)">
+                            <option value="Dinheiro">Dinheiro</option><option value="Pix">Pix</option><option value="Cartão">Cartão</option><option value="Cheque">Cheque</option>
+                        </select>
+                    </div>
+                    <div class="form-group"><label>Moeda</label>
+                        <select class="baixaMoeda" onchange="atualizarResumoBaixaCarteira()"><option value="BRL">Real (R$)</option><option value="USD">Dólar (US$)</option></select>
+                    </div>
+                    <div class="form-group"><label>Valor</label><input type="number" class="baixaValor" min="0" step="0.01" placeholder="0,00" oninput="atualizarResumoBaixaCarteira()"></div>
+                    <button type="button" class="btn btn-danger" onclick="this.closest('.baixa-pagamento-item').remove();atualizarResumoBaixaCarteira();">✕</button>
+                </div>
+                <div class="baixaChequeFields" style="display:none;margin-top:8px;">
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
+                        <div class="form-group"><label>Nome no cheque</label><input type="text" class="baixaChequeNome"></div>
+                        <div class="form-group"><label>Nº do cheque</label><input type="text" class="baixaChequeNumero"></div>
+                        <div class="form-group"><label>Telefone</label><input type="text" class="baixaChequeTelefone"></div>
+                    </div>
+                </div>`;
+            return div;
+        }
+
+        function toggleCamposBaixaCarteira(select) {
+            const item = select.closest('.baixa-pagamento-item');
+            const fields = item?.querySelector('.baixaChequeFields');
+            if (fields) fields.style.display = select.value === 'Cheque' ? 'block' : 'none';
+        }
+
+        function adicionarPagamentoBaixaCarteira() {
+            document.getElementById('baixaPagamentosContainer').appendChild(criarLinhaBaixaCarteira());
+        }
+
+        function atualizarResumoBaixaCarteira() {
+            const registro = getCarteira().find(c => c.id === parseInt(document.getElementById('baixaCarteiraId')?.value));
+            if (!registro) return;
+            const cot = getCotacao().valor || 0;
+            let totalBRL = 0;
+            document.querySelectorAll('#baixaPagamentosContainer .baixa-pagamento-item').forEach(item => {
+                const valor = parseFloat(item.querySelector('.baixaValor')?.value) || 0;
+                const moeda = item.querySelector('.baixaMoeda')?.value || 'BRL';
+                totalBRL += moeda === 'USD' ? valor * cot : valor;
+            });
+            document.getElementById('baixaTotalBRL').textContent = `${formatMoneyBRL(totalBRL)}${cot ? ` (cotação US$ ${cot.toFixed(4)})` : ''}`;
+            document.getElementById('baixaSaldoBRL').textContent = formatMoneyBRL(Math.max(0, getSaldoCarteira(registro) - totalBRL));
+        }
+
+        function resumoFormaPagamento(item) {
+            const metodo = item.querySelector('.baixaMetodo').value;
+            const moeda = item.querySelector('.baixaMoeda').value;
+            const valor = parseFloat(item.querySelector('.baixaValor').value) || 0;
+            const moedaTxt = moeda === 'USD' ? 'US$' : 'R$';
+            let resumo = `${metodo}: ${moedaTxt} ${valor.toFixed(2)}`;
+            if (metodo === 'Cheque') resumo += ` (Cheque ${item.querySelector('.baixaChequeNumero')?.value || ''})`;
+            return resumo;
+        }
+
+        function abrirBaixaCarteira(id) {
+            const registro = getCarteira().find(c => c.id === id);
+            if (!registro) return;
             const cliente = clientes.find(c => c.id === registro.clienteId);
-            const nomeCliente = cliente ? `${cliente.nome || ''} ${cliente.sobrenome || ''}`.trim() : 'cliente';
-            if (!confirm(`Confirmar recebimento de R$ ${(parseFloat(registro.valor)||0).toFixed(2)} de ${nomeCliente}?`)) return;
+            const nomeCliente = cliente ? `${cliente.nome || ''} ${cliente.sobrenome || ''}`.trim() : 'Cliente';
+            const saldo = getSaldoCarteira(registro);
+            document.getElementById('baixaCarteiraId').value = id;
+            document.getElementById('baixaCarteiraInfo').innerHTML = `<strong>Pedido:</strong> ${registro.pedidoNumero || 'PED-' + registro.vendaId} &nbsp; | &nbsp; <strong>Cliente:</strong> ${nomeCliente}<br><strong>Saldo a receber:</strong> <span style="font-size:20px;color:#c62828;font-weight:bold;">${formatMoneyBRL(saldo)}</span>`;
+            document.getElementById('baixaPagamentosContainer').innerHTML = '';
+            adicionarPagamentoBaixaCarteira();
+            document.getElementById('baixaPagamentosContainer').querySelector('.baixaValor').value = '';
+            atualizarResumoBaixaCarteira();
+            document.getElementById('modalBaixaCarteira').classList.add('active');
+        }
+
+        async function darBaixaCarteira(id) {
+            const registro = getCarteira().find(c => c.id === id);
+            if (!registro || getSaldoCarteira(registro) <= 0.009) return;
+            abrirBaixaCarteira(id);
+        }
+
+        async function confirmarBaixaCarteira() {
+            const id = parseInt(document.getElementById('baixaCarteiraId').value);
+            const registro = getCarteira().find(c => c.id === id);
+            if (!registro) return;
+            const saldoAtual = getSaldoCarteira(registro);
+            const cot = getCotacao().valor || 0;
+            const pagamentos = [];
+            let totalBRL = 0;
+
+            try {
+                const itens = document.querySelectorAll('#baixaPagamentosContainer .baixa-pagamento-item');
+                for (const item of itens) {
+                    const metodo = item.querySelector('.baixaMetodo').value;
+                    const moeda = item.querySelector('.baixaMoeda').value;
+                    const valor = parseFloat(item.querySelector('.baixaValor').value) || 0;
+                    if (valor <= 0) continue;
+                    if (moeda === 'USD' && cot <= 0) throw new Error('Defina a cotação do dólar antes de receber em dólar.');
+                    const valorBRL = moeda === 'USD' ? valor * cot : valor;
+                    const dados = { metodo, moeda, valor, valorBRL, cotacao: moeda === 'USD' ? cot : null };
+                    if (metodo === 'Cheque') {
+                        dados.chequeNome = item.querySelector('.baixaChequeNome').value.trim();
+                        dados.chequeNumero = item.querySelector('.baixaChequeNumero').value.trim();
+                        dados.chequeTelefone = item.querySelector('.baixaChequeTelefone').value.trim();
+                        if (!dados.chequeNome || !dados.chequeNumero) throw new Error('Preencha o nome e o número de todos os cheques.');
+                    }
+                    pagamentos.push(dados);
+                    totalBRL += valorBRL;
+                }
+            } catch (erro) {
+                alert(erro.message);
+                return;
+            }
+
+            if (!pagamentos.length) { alert('Informe pelo menos um pagamento.'); return; }
+            if (totalBRL > saldoAtual + 0.01) { alert(`O recebimento (${formatMoneyBRL(totalBRL)}) é maior que o saldo da carteira (${formatMoneyBRL(saldoAtual)}).`); return; }
+            if (Math.abs(totalBRL - saldoAtual) > 0.01 && !confirm(`Este pagamento será PARCIAL.\n\nRecebido: ${formatMoneyBRL(totalBRL)}\nSaldo restante: ${formatMoneyBRL(saldoAtual-totalBRL)}\n\nDeseja continuar?`)) return;
+
+            const agora = new Date().toISOString();
+            const novaBaixa = {
+                id: Date.now(), data: agora, usuario: usuarioLogado ? usuarioLogado.nome : '',
+                pagamentos, totalBRL, resumo: pagamentos.map(resumoFormaPagamento).join(' + ')
+            };
+            if (!Array.isArray(registro.baixas)) registro.baixas = [];
+            registro.baixas.push(novaBaixa);
+            registro.valorPagoAcumuladoBRL = (parseFloat(registro.valorPagoAcumuladoBRL) || 0) + totalBRL;
+            registro.saldoRestanteBRL = Math.max(0, saldoAtual - totalBRL);
+            registro.dataUltimaBaixa = agora;
+            registro.metodoBaixa = novaBaixa.resumo;
+            registro.usuarioBaixa = novaBaixa.usuario;
 
             const venda = getVendas().find(v => v.id === registro.vendaId);
             if (venda && Array.isArray(venda.pagamentos)) {
-                venda.pagamentos.forEach(p => {
-                    if (p.metodo === 'Carteira' && p.carteiraId === registro.id) {
-                        p.status = 'pago';
-                        p.dataBaixa = new Date().toISOString();
-                        p.metodoBaixa = 'Recebimento da carteira';
-                    }
-                });
+                const pagamentoCarteira = venda.pagamentos.find(p => p.metodo === 'Carteira' && p.carteiraId === registro.id);
+                if (pagamentoCarteira) {
+                    pagamentoCarteira.valorPagoBRL = registro.valorPagoAcumuladoBRL;
+                    pagamentoCarteira.saldoRestanteBRL = registro.saldoRestanteBRL;
+                    pagamentoCarteira.baixas = registro.baixas;
+                    pagamentoCarteira.status = registro.saldoRestanteBRL <= 0.009 ? 'pago' : 'parcial';
+                    pagamentoCarteira.dataBaixa = registro.saldoRestanteBRL <= 0.009 ? agora : null;
+                    pagamentoCarteira.metodoBaixa = novaBaixa.resumo;
+                }
             }
-            registro.status = 'pago';
-            registro.dataBaixa = new Date().toISOString();
-            registro.metodoBaixa = 'Recebimento da carteira';
-            registro.usuarioBaixa = usuarioLogado ? usuarioLogado.nome : '';
 
+            registro.status = registro.saldoRestanteBRL <= 0.009 ? 'pago' : 'aberto';
             await salvarDadosFirebase();
-            loadCarteira();
-            loadVendas();
-            alert('Pagamento recebido e baixado da carteira com sucesso!');
+            closeModal('modalBaixaCarteira');
+            loadCarteira(); loadVendas();
+            alert(registro.status === 'pago' ? 'Pagamento recebido e carteira quitada com sucesso!' : `Pagamento parcial registrado. Saldo restante: ${formatMoneyBRL(registro.saldoRestanteBRL)}.`);
         }
 
         // =========================================================================
