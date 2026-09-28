@@ -1552,6 +1552,7 @@
                 </div>
                 <div style="display:flex; gap:10px; flex-wrap:wrap;">
                     <button class="btn btn-primary" onclick="openModal('modalEstoque')">+ Adicionar Pneu</button>
+                    <button class="btn btn-success" onclick="openModal('modalTransferenciaEstoque')">↔️ Transferência de estoque</button>
                     <button class="btn btn-historico" onclick="abrirHistoricoEstoque()">📜 Histórico</button>
                 </div>
             </div>
@@ -1658,6 +1659,12 @@
                     <label>Cliente</label>
                     <select id="relatorioCliente">
                         <option value="">Todos Clientes</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Vendedor</label>
+                    <select id="relatorioVendedor" onchange="gerarRelatorio()">
+                        <option value="">Todos Vendedores</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -1821,6 +1828,32 @@
                 </div>
 
                 <button type="submit" class="btn btn-primary" style="width: 100%;">Adicionar ao Estoque</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal Transferência de Estoque -->
+    <div class="modal" id="modalTransferenciaEstoque">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>↔️ Transferência de Estoque</h2>
+                <span class="close" onclick="closeModal('modalTransferenciaEstoque')">&times;</span>
+            </div>
+            <form id="formTransferenciaEstoque">
+                <div class="form-group">
+                    <label>Enviar estoque para</label>
+                    <select id="transferenciaDestino" required>
+                        <option value="">Selecione o estoque de destino</option>
+                        <option value="toledo">Estoque Sanga Puitã</option>
+                        <option value="filial">Estoque Filial</option>
+                    </select>
+                </div>
+                <div style="background:#fff8e1; padding:12px; border-radius:5px; margin-bottom:15px; color:#795548;">
+                    ℹ️ A transferência apenas movimenta os pneus entre os estoques. Não será gerado custo de compra.
+                </div>
+                <div id="transferenciaItens"></div>
+                <button type="button" class="btn btn-primary" onclick="adicionarItemTransferencia()" style="margin:10px 0;">+ Adicionar pneu</button>
+                <button type="submit" class="btn btn-success" style="width:100%;">↔️ Confirmar transferência</button>
             </form>
         </div>
     </div>
@@ -2823,6 +2856,7 @@
             loadRelatorioMarcas();
             loadRelatorioMedidas();
             loadRelatorioProfundidades();
+            loadRelatorioVendedores();
             atualizarRelatorios();
             updateFilterOptions();
             carregarPedidos();
@@ -2861,6 +2895,13 @@
                 if (id === 'modalDespesa') {
                     document.getElementById('despesaData').value = new Date().toISOString().split('T')[0];
                     document.getElementById('despesaFilial').value = filialAtual;
+                }
+                if (id === 'modalTransferenciaEstoque') {
+                    const destino = document.getElementById('transferenciaDestino');
+                    destino.value = filialAtual === 'toledo' ? 'filial' : 'toledo';
+                    const container = document.getElementById('transferenciaItens');
+                    container.innerHTML = '';
+                    adicionarItemTransferencia();
                 }
                 if (id === 'modalEstoque') {
                     document.getElementById('estoqueProfundidade').value = '';
@@ -3390,6 +3431,137 @@
             loadEstoque();
             atualizarBadges();
             alert('Pneu adicionado ao estoque com sucesso!');
+        });
+
+        function nomeFilial(filial) {
+            return filial === 'toledo' ? 'Sanga Puitã' : 'Filial';
+        }
+
+        function adicionarItemTransferencia() {
+            const container = document.getElementById('transferenciaItens');
+            if (!container) return;
+            const estoque = getEstoque().filter(e => e.quantidade > 0);
+            if (estoque.length === 0) {
+                container.innerHTML = '<p style="text-align:center; padding:15px;">Não há pneus disponíveis para transferência neste estoque.</p>';
+                return;
+            }
+            const div = document.createElement('div');
+            div.className = 'form-row transferencia-item';
+            div.style.cssText = 'align-items:end; margin-bottom:10px; gap:8px;';
+            const options = estoque.map(e => {
+                const marca = e.marca ? e.marca + ' ' : '';
+                return `<option value="${e.id}">${marca}${e.medida} - ${e.profundidade} (Disponível: ${e.quantidade})</option>`;
+            }).join('');
+            div.innerHTML = `
+                <div class="form-group" style="flex:1; margin:0;">
+                    <label>Pneu</label>
+                    <select class="transferenciaPneu" required>${options}</select>
+                </div>
+                <div class="form-group" style="flex:0 0 100px; margin:0;">
+                    <label>Quantidade</label>
+                    <input type="number" class="transferenciaQuantidade" min="1" value="1" required>
+                </div>
+                <button type="button" class="btn btn-danger" onclick="this.closest('.transferencia-item').remove()">✕</button>
+            `;
+            container.appendChild(div);
+        }
+
+        document.getElementById('formTransferenciaEstoque').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const origem = filialAtual;
+            const destino = document.getElementById('transferenciaDestino').value;
+            if (!destino || destino === origem) {
+                alert('Selecione um estoque de destino diferente do estoque atual.');
+                return;
+            }
+
+            const itens = [];
+            document.querySelectorAll('.transferencia-item').forEach(item => {
+                const pneuId = parseInt(item.querySelector('.transferenciaPneu').value);
+                const quantidade = parseInt(item.querySelector('.transferenciaQuantidade').value);
+                if (pneuId && quantidade > 0) itens.push({ pneuId, quantidade });
+            });
+            if (itens.length === 0) {
+                alert('Adicione pelo menos um pneu à transferência.');
+                return;
+            }
+
+            // Agrupar itens repetidos para evitar movimentar duas vezes o mesmo produto.
+            const agrupados = {};
+            itens.forEach(item => agrupados[item.pneuId] = (agrupados[item.pneuId] || 0) + item.quantidade);
+            const estoqueOrigem = dados[origem].estoque;
+            const estoqueDestino = dados[destino].estoque;
+            const entradasOrigem = dados[origem].entradas;
+            const entradasDestino = dados[destino].entradas;
+            const agora = new Date().toISOString();
+
+            for (const [idStr, quantidade] of Object.entries(agrupados)) {
+                const pneuOrigem = estoqueOrigem.find(e => e.id === parseInt(idStr));
+                if (!pneuOrigem) {
+                    alert('Um dos pneus selecionados não foi encontrado no estoque de origem.');
+                    return;
+                }
+                if (pneuOrigem.quantidade < quantidade) {
+                    alert(`Quantidade insuficiente para ${pneuOrigem.marca ? pneuOrigem.marca + ' ' : ''}${pneuOrigem.medida} - ${pneuOrigem.profundidade}. Disponível: ${pneuOrigem.quantidade}.`);
+                    return;
+                }
+            }
+
+            for (const [idStr, quantidade] of Object.entries(agrupados)) {
+                const pneuOrigem = estoqueOrigem.find(e => e.id === parseInt(idStr));
+                const marca = pneuOrigem.marca || '';
+                const medida = pneuOrigem.medida;
+                const profundidade = pneuOrigem.profundidade;
+                const produtoDestino = estoqueDestino.find(e =>
+                    (e.marca || '') === marca && e.medida === medida && e.profundidade === profundidade
+                );
+
+                pneuOrigem.quantidade -= quantidade;
+
+                if (produtoDestino) {
+                    // O custo unitário permanece o mesmo; a transferência não cria custo.
+                    const qtdAtual = produtoDestino.quantidade;
+                    const valorAtual = produtoDestino.valorCompra || 0;
+                    const valorTransferido = pneuOrigem.valorCompra || 0;
+                    const qtdFinal = qtdAtual + quantidade;
+                    produtoDestino.valorCompra = qtdFinal > 0
+                        ? parseFloat(((qtdAtual * valorAtual + quantidade * valorTransferido) / qtdFinal).toFixed(2))
+                        : 0;
+                    if (pneuOrigem.valorUSD !== undefined) produtoDestino.valorUSD = produtoDestino.valorCompra && pneuOrigem.cotacaoUsada ? parseFloat((produtoDestino.valorCompra / pneuOrigem.cotacaoUsada).toFixed(2)) : produtoDestino.valorUSD;
+                    produtoDestino.quantidade = qtdFinal;
+                } else {
+                    const novo = JSON.parse(JSON.stringify(pneuOrigem));
+                    novo.id = dados[destino].nextEstoqueId++;
+                    novo.quantidade = quantidade;
+                    estoqueDestino.push(novo);
+                }
+
+                const descricao = `${marca ? marca + ' ' : ''}${medida} - ${profundidade}`;
+                const registroBase = {
+                    quantidade,
+                    valorUnitario: 0,
+                    valorUSD: 0,
+                    moeda: 'BRL',
+                    moedaOriginal: 'BRL',
+                    cotacaoUsada: null,
+                    data: agora,
+                    tipo: 'transferencia',
+                    descricao: 'Transferência de estoque',
+                    produtoDescricao: descricao,
+                    estoqueOrigem: origem,
+                    estoqueDestino: destino,
+                    origemNome: nomeFilial(origem),
+                    destinoNome: nomeFilial(destino),
+                    pneuIdOrigem: pneuOrigem.id
+                };
+                entradasOrigem.push({ id: dados[origem].nextEntradaId++, ...registroBase, operacao: 'saida' });
+                entradasDestino.push({ id: dados[destino].nextEntradaId++, ...registroBase, operacao: 'entrada' });
+            }
+
+            closeModal('modalTransferenciaEstoque');
+            await salvarDadosFirebase();
+            carregarTudo();
+            alert(`Transferência concluída: ${nomeFilial(origem)} → ${nomeFilial(destino)}.`);
         });
 
         function loadEstoque() {
@@ -5485,6 +5657,21 @@
             if (currentValue) select.value = currentValue;
         }
 
+        function loadRelatorioVendedores() {
+            const select = document.getElementById('relatorioVendedor');
+            if (!select) return;
+            const currentValue = select.value;
+            const vendedores = [...new Set(getVendas().map(v => v.vendedor).filter(v => v))].sort();
+            select.innerHTML = '<option value="">Todos Vendedores</option>';
+            vendedores.forEach(v => {
+                const option = document.createElement('option');
+                option.value = v;
+                option.textContent = v;
+                select.appendChild(option);
+            });
+            if (currentValue) select.value = currentValue;
+        }
+
         function trocarRelatorio(tipo) {
             relatorioAtual = tipo;
             document.querySelectorAll('.relatorio-tab').forEach(tab => {
@@ -5499,6 +5686,7 @@
             const dataInicio = document.getElementById('relatorioDataInicio')?.value || '';
             const dataFim = document.getElementById('relatorioDataFim')?.value || '';
             const clienteId = document.getElementById('relatorioCliente')?.value || '';
+            const vendedor = document.getElementById('relatorioVendedor')?.value || '';
             const marca = document.getElementById('relatorioMarca')?.value || '';
             const medida = document.getElementById('relatorioMedida')?.value || '';
             const profundidade = document.getElementById('relatorioProfundidade')?.value || '';
@@ -5536,7 +5724,7 @@
             if (!container) return;
 
             if (relatorioAtual === 'vendas') {
-                gerarRelatorioVendas(container, dataInicio, dataFim, clienteId, marca, medida, profundidade, vendas);
+                gerarRelatorioVendas(container, dataInicio, dataFim, clienteId, vendedor, marca, medida, profundidade, vendas);
             } else if (relatorioAtual === 'entradas') {
                 gerarRelatorioEntradas(container, dataInicio, dataFim, marca, medida, profundidade, entradas, estoque);
             } else if (relatorioAtual === 'estoque') {
@@ -5545,12 +5733,13 @@
         }
 
         // ===== FUNÇÃO MODIFICADA: RELATÓRIO DE VENDAS COM NOME COMPLETO DO PRODUTO =====
-        function gerarRelatorioVendas(container, dataInicio, dataFim, clienteId, marca, medida, profundidade, vendas) {
+        function gerarRelatorioVendas(container, dataInicio, dataFim, clienteId, vendedor, marca, medida, profundidade, vendas) {
             let filtered = vendas.filter(v => {
                 const data = new Date(v.data);
                 const matchData = (!dataInicio || data >= new Date(dataInicio)) &&
                     (!dataFim || data <= new Date(dataFim));
                 const matchCliente = !clienteId || v.clienteId === parseInt(clienteId);
+                const matchVendedor = !vendedor || v.vendedor === vendedor;
                 const matchMarca = !marca || v.produtos.some(p => {
                     const pneu = getEstoque().find(e => e.id === p.pneuId);
                     return pneu && pneu.marca === marca;
@@ -5563,7 +5752,7 @@
                     const pneu = getEstoque().find(e => e.id === p.pneuId);
                     return pneu && pneu.profundidade === profundidade;
                 });
-                return matchData && matchCliente && matchMarca && matchMedida && matchProfundidade;
+                return matchData && matchCliente && matchVendedor && matchMarca && matchMedida && matchProfundidade;
             });
 
             if (filtered.length === 0) {
@@ -5743,15 +5932,11 @@
                 return matchMarca && matchMedida && matchProfundidade;
             });
 
-            if (filtered.length === 0) {
-                container.innerHTML =
-                    '<p style="text-align: center; padding: 20px;">Nenhum produto em estoque para os filtros selecionados.</p>';
-                return;
-            }
-
             const totalGeral = filtered.reduce((sum, e) => sum + (e.quantidade * e.valorCompra), 0);
             const totalQtd = filtered.reduce((sum, e) => sum + e.quantidade, 0);
             const totalUSD = filtered.reduce((sum, e) => sum + ((e.valorUSD || 0) * e.quantidade), 0);
+            const transferencias = getEntradas().filter(e => e.tipo === 'transferencia')
+                .sort((a, b) => new Date(b.data) - new Date(a.data));
 
             let html = `
                 <div class="pdf-header">
@@ -5764,39 +5949,48 @@
                     <div class="pdf-stat"><div class="label">Valor Total</div><div class="value">R$ ${totalGeral.toFixed(2)}</div></div>
                     <div class="pdf-stat"><div class="label">Total em USD</div><div class="value">US$ ${totalUSD.toFixed(2)}</div></div>
                 </div>
-                <div class="table-responsive"><table>
+            `;
+
+            if (filtered.length > 0) {
+                html += `<div class="table-responsive"><table>
                     <thead><tr><th>ID</th><th>Marca</th><th>Medida</th><th>Profundidade</th><th>Quantidade</th><th>Valor Médio</th><th>Valor Total</th></tr></thead>
-                    <tbody>
-            `;
+                    <tbody>`;
+                filtered.forEach(e => {
+                    const total = e.quantidade * e.valorCompra;
+                    const marcaDisplay = e.marca || '-';
+                    let valorDisplay = `R$ ${e.valorCompra.toFixed(2)}`;
+                    if (e.moedaOriginal === 'USD' && e.valorUSD) valorDisplay = `R$ ${e.valorCompra.toFixed(2)} (US$ ${e.valorUSD.toFixed(2)})`;
+                    html += `<tr>
+                        <td>${e.id}</td><td>${marcaDisplay}</td><td>${e.medida}</td><td>${e.profundidade}</td>
+                        <td style="text-align:center;">${e.quantidade}</td><td style="text-align:right;">${valorDisplay}</td>
+                        <td style="text-align:right; font-weight:bold;">R$ ${total.toFixed(2)}</td>
+                    </tr>`;
+                });
+                html += `<tr style="font-weight:bold;background:#f5f5f5;"><td colspan="4" style="text-align:right;">TOTAIS</td><td style="text-align:center;">${totalQtd} unid.</td><td></td><td style="text-align:right;">R$ ${totalGeral.toFixed(2)}</td></tr></tbody></table></div>`;
+            } else {
+                html += '<p style="text-align:center;padding:20px;">Nenhum produto em estoque para os filtros selecionados.</p>';
+            }
 
-            filtered.forEach(e => {
-                const total = e.quantidade * e.valorCompra;
-                const marcaDisplay = e.marca || '-';
-                let valorDisplay = `R$ ${e.valorCompra.toFixed(2)}`;
-                if (e.moedaOriginal === 'USD' && e.valorUSD) {
-                    valorDisplay = `R$ ${e.valorCompra.toFixed(2)} (US$ ${e.valorUSD.toFixed(2)})`;
-                }
-                html += `<tr>
-                    <td>${e.id}</td>
-                    <td>${marcaDisplay}</td>
-                    <td>${e.medida}</td>
-                    <td>${e.profundidade}</td>
-                    <td style="text-align:center;">${e.quantidade}</td>
-                    <td style="text-align:right;">${valorDisplay}</td>
-                    <td style="text-align:right; font-weight:bold;">R$ ${total.toFixed(2)}</td>
-                </tr>`;
-            });
-
-            html += `
-                    <tr style="font-weight: bold; background: #f5f5f5;">
-                        <td colspan="4" style="text-align: right;">TOTAIS</td>
-                        <td style="text-align:center;">${totalQtd} unid.</td>
-                        <td></td>
-                        <td style="text-align:right;">R$ ${totalGeral.toFixed(2)}</td>
-                    </tr>
-                </tbody></table></div>
-                <div class="pdf-footer">Sistema de Gerenciamento de Pneus - Relatório gerado automaticamente</div>
-            `;
+            html += `<div style="margin-top:25px;"><h2 style="color:#1a237e;">↔️ Transferências de Estoque</h2>`;
+            if (transferencias.length === 0) {
+                html += '<p style="text-align:center;padding:15px;">Nenhuma transferência registrada neste estoque.</p>';
+            } else {
+                html += `<div class="table-responsive"><table><thead><tr><th>Data</th><th>Tipo</th><th>Pneu</th><th>Quantidade</th><th>Origem</th><th>Destino</th><th>Custo</th></tr></thead><tbody>`;
+                transferencias.forEach(t => {
+                    const movimento = t.operacao === 'saida' ? 'Saída por transferência' : 'Entrada por transferência';
+                    html += `<tr>
+                        <td>${new Date(t.data).toLocaleString('pt-BR')}</td>
+                        <td><strong>Transferência de estoque</strong><br><small>${movimento}</small></td>
+                        <td>${t.produtoDescricao || 'Pneu'}</td>
+                        <td style="text-align:center;">${t.quantidade}</td>
+                        <td>${t.origemNome || nomeFilial(t.estoqueOrigem)}</td>
+                        <td>${t.destinoNome || nomeFilial(t.estoqueDestino)}</td>
+                        <td style="text-align:right;">R$ 0,00</td>
+                    </tr>`;
+                });
+                html += '</tbody></table></div>';
+            }
+            html += '<div class="pdf-footer">Sistema de Gerenciamento de Pneus - Relatório gerado automaticamente</div>';
             container.innerHTML = html;
         }
 
@@ -6225,6 +6419,7 @@
                     loadRelatorioMarcas();
                     loadRelatorioMedidas();
                     loadRelatorioProfundidades();
+                    loadRelatorioVendedores();
                     gerarRelatorio();
                 }
                 loadEstoque();
