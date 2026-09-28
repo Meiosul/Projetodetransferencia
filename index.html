@@ -3953,7 +3953,7 @@
                                             <th>Medida</th>
                                             <th>Profundidade</th>
                                             <th>Quantidade</th>
-                                            <th>Valor Médio</th>
+                                            ${adminEstoque ? '<th>Valor Médio</th>' : ''}
                                             <th>Valor Venda</th>
                                             <th>Valor Mínimo</th>
                                             <th>Moeda</th>
@@ -3983,7 +3983,7 @@
                             <td>${item.medida}</td>
                             <td>${item.profundidade}</td>
                             <td>${item.quantidade}</td>
-                            <td>${valorDisplay}</td>
+                            ${adminEstoque ? `<td>${valorDisplay}</td>` : ''}
                             <td>R$ ${(item.valorVenda || 0).toFixed(2)}</td>
                             <td>R$ ${(item.valorMinimoVenda || 0).toFixed(2)}</td>
                             <td>${moedaDisplay}</td>
