@@ -1646,9 +1646,10 @@
                 <button class="relatorio-tab active" onclick="trocarRelatorio('vendas')">📊 Vendas</button>
                 <button class="relatorio-tab" onclick="trocarRelatorio('entradas')">📥 Entradas</button>
                 <button class="relatorio-tab" onclick="trocarRelatorio('estoque')">📦 Estoque</button>
+                <button class="relatorio-tab" onclick="trocarRelatorio('transferencias')">↔️ Transferências</button>
             </div>
 
-            <div class="filters">
+            <div id="filtrosRelatorioPadrao" class="filters">
                 <div class="form-group">
                     <label>Data Início</label>
                     <input type="date" id="relatorioDataInicio">
@@ -1694,6 +1695,38 @@
                 <button class="btn btn-primary" onclick="gerarRelatorio()">Gerar Relatório</button>
             </div>
 
+            <div id="filtrosRelatorioTransferencias" class="filters" style="display:none;">
+                <div class="form-group">
+                    <label>Data Início</label>
+                    <input type="date" id="transferenciaDataInicio" onchange="gerarRelatorioTransferencias()">
+                </div>
+                <div class="form-group">
+                    <label>Data Fim</label>
+                    <input type="date" id="transferenciaDataFim" onchange="gerarRelatorioTransferencias()">
+                </div>
+                <div class="form-group">
+                    <label>Origem</label>
+                    <select id="transferenciaFiltroOrigem" onchange="gerarRelatorioTransferencias()">
+                        <option value="">Todos</option>
+                        <option value="toledo">Sanga Puitã</option>
+                        <option value="filial">Filial</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Destino</label>
+                    <select id="transferenciaFiltroDestino" onchange="gerarRelatorioTransferencias()">
+                        <option value="">Todos</option>
+                        <option value="toledo">Sanga Puitã</option>
+                        <option value="filial">Filial</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Buscar pneu</label>
+                    <input type="text" id="transferenciaBusca" placeholder="Marca, medida ou profundidade..." oninput="gerarRelatorioTransferencias()">
+                </div>
+                <button class="btn btn-primary" onclick="gerarRelatorioTransferencias()">🔎 Filtrar</button>
+            </div>
+
             <div class="stats-grid" id="relatorioStats">
                 <div class="stat-card">
                     <h3>Total Vendido (Mês)</h3>
@@ -1717,10 +1750,13 @@
                 <div id="relatorioContent" class="pdf-content">
                     <div id="relatorioTable"></div>
                 </div>
-                <div class="relatorio-actions no-print">
+                <div class="relatorio-actions no-print" id="acoesRelatorioPadrao">
                     <button class="btn btn-pdf" onclick="gerarPDF()">📄 Gerar PDF</button>
                     <button class="btn btn-whatsapp" onclick="enviarRelatorioWhatsApp()">📱 Enviar WhatsApp</button>
                     <button class="btn btn-matricial" onclick="imprimirMatricial()">🖨️ Impressora Matricial</button>
+                </div>
+                <div class="relatorio-actions no-print" id="acoesRelatorioTransferencias" style="display:none;">
+                    <button class="btn btn-pdf" onclick="gerarPDFTransferencias()">📄 Gerar PDF das Transferências</button>
                 </div>
             </div>
         </div>
@@ -3733,6 +3769,8 @@
             const entradasOrigem = dados[origem].entradas;
             const entradasDestino = dados[destino].entradas;
             const agora = new Date().toISOString();
+            // Um único identificador para toda a transferência, mesmo com vários pneus.
+            const transferenciaId = `TRF-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
 
             // Validar tudo antes de alterar qualquer estoque.
             const quantidadePorPneu = {};
@@ -3845,6 +3883,7 @@
                     cotacaoUsada: null,
                     data: agora,
                     tipo: 'transferencia',
+                    transferenciaId,
                     descricao: incremento > 0
                         ? `Transferência de estoque + acréscimo de R$ ${incremento.toFixed(2)} por unidade`
                         : 'Transferência de estoque',
@@ -6309,7 +6348,23 @@
             });
             const target = document.querySelector(`.relatorio-tab[onclick="trocarRelatorio('${tipo}')"]`);
             if (target) target.classList.add('active');
-            gerarRelatorio();
+
+            const filtrosPadrao = document.getElementById('filtrosRelatorioPadrao');
+            const filtrosTransferencias = document.getElementById('filtrosRelatorioTransferencias');
+            const acoesPadrao = document.getElementById('acoesRelatorioPadrao');
+            const acoesTransferencias = document.getElementById('acoesRelatorioTransferencias');
+
+            const isTransferencia = tipo === 'transferencias';
+            if (filtrosPadrao) filtrosPadrao.style.display = isTransferencia ? 'none' : 'flex';
+            if (filtrosTransferencias) filtrosTransferencias.style.display = isTransferencia ? 'flex' : 'none';
+            if (acoesPadrao) acoesPadrao.style.display = isTransferencia ? 'none' : 'flex';
+            if (acoesTransferencias) acoesTransferencias.style.display = isTransferencia ? 'flex' : 'none';
+
+            if (isTransferencia) {
+                gerarRelatorioTransferencias();
+            } else {
+                gerarRelatorio();
+            }
         }
 
         function gerarRelatorio() {
@@ -6360,6 +6415,197 @@
             } else if (relatorioAtual === 'estoque') {
                 gerarRelatorioEstoque(container, marca, medida, profundidade, estoque);
             }
+        }
+
+
+        // =========================================================================
+        // RELATÓRIO EXCLUSIVO DE TRANSFERÊNCIAS DE ESTOQUE
+        // =========================================================================
+        function obterTransferenciasEstoque() {
+            const entradas = getEntradas();
+
+            // A saída da origem representa uma transferência uma única vez.
+            // A entrada correspondente no destino não é duplicada no relatório.
+            const registros = entradas.filter(e =>
+                e.tipo === 'transferencia' && e.operacao === 'saida'
+            );
+
+            return registros.map((e, index) => ({
+                transferenciaId: e.transferenciaId || `LEGACY-${e.data}-${e.id}-${index}`,
+                data: e.data,
+                origem: e.estoqueOrigem,
+                destino: e.estoqueDestino,
+                origemNome: e.origemNome || nomeFilial(e.estoqueOrigem),
+                destinoNome: e.destinoNome || nomeFilial(e.estoqueDestino),
+                itens: [{
+                    produtoDescricao: e.produtoDescricao || e.descricao || 'Pneu',
+                    quantidade: Number(e.quantidade) || 0,
+                    valorUnitarioOrigem: Number(e.valorUnitarioOrigem) || 0,
+                    valorUnitario: Number(e.valorUnitario) || 0,
+                    incrementoValor: Number(e.incrementoValor) || 0
+                }]
+            }));
+        }
+
+        function gerarRelatorioTransferencias() {
+            const container = document.getElementById('relatorioTable');
+            if (!container) return;
+
+            const dataInicio = document.getElementById('transferenciaDataInicio')?.value || '';
+            const dataFim = document.getElementById('transferenciaDataFim')?.value || '';
+            const origem = document.getElementById('transferenciaFiltroOrigem')?.value || '';
+            const destino = document.getElementById('transferenciaFiltroDestino')?.value || '';
+            const busca = (document.getElementById('transferenciaBusca')?.value || '').toLowerCase().trim();
+
+            const registros = obterTransferenciasEstoque();
+
+            // Agrupa os vários pneus pertencentes à mesma transferência.
+            const grupos = {};
+            registros.forEach(t => {
+                if (!grupos[t.transferenciaId]) {
+                    grupos[t.transferenciaId] = {
+                        transferenciaId: t.transferenciaId,
+                        data: t.data,
+                        origem: t.origem,
+                        destino: t.destino,
+                        origemNome: t.origemNome,
+                        destinoNome: t.destinoNome,
+                        itens: []
+                    };
+                }
+                grupos[t.transferenciaId].itens.push(...t.itens);
+            });
+
+            let filtered = Object.values(grupos).filter(t => {
+                const data = new Date(t.data);
+                const inicio = dataInicio ? new Date(`${dataInicio}T00:00:00`) : null;
+                const fim = dataFim ? new Date(`${dataFim}T23:59:59`) : null;
+                const textoItens = t.itens.map(i => i.produtoDescricao || '').join(' ').toLowerCase();
+
+                return (!inicio || data >= inicio) &&
+                    (!fim || data <= fim) &&
+                    (!origem || t.origem === origem) &&
+                    (!destino || t.destino === destino) &&
+                    (!busca ||
+                        textoItens.includes(busca) ||
+                        t.origemNome.toLowerCase().includes(busca) ||
+                        t.destinoNome.toLowerCase().includes(busca));
+            }).sort((a, b) => new Date(b.data) - new Date(a.data));
+
+            const totalTransferencias = filtered.length;
+            const totalPneus = filtered.reduce((sum, t) =>
+                sum + t.itens.reduce((s, i) => s + i.quantidade, 0), 0);
+            const valorTotalOrigem = filtered.reduce((sum, t) =>
+                sum + t.itens.reduce((s, i) => s + i.quantidade * i.valorUnitarioOrigem, 0), 0);
+            const valorTotalDestino = filtered.reduce((sum, t) =>
+                sum + t.itens.reduce((s, i) => s + i.quantidade * i.valorUnitario, 0), 0);
+
+            let html = `
+                <div class="pdf-header">
+                    <h1>↔️ Transferências de Estoque</h1>
+                    <div class="subtitle">Documento exclusivo de transferências de estoque</div>
+                    <div class="subtitle">Gerado em: ${new Date().toLocaleString('pt-BR')}</div>
+                </div>
+                <div class="pdf-stats">
+                    <div class="pdf-stat"><div class="label">Transferências</div><div class="value">${totalTransferencias}</div></div>
+                    <div class="pdf-stat"><div class="label">Pneus Transferidos</div><div class="value">${totalPneus}</div></div>
+                    <div class="pdf-stat"><div class="label">Valor na Origem</div><div class="value">R$ ${valorTotalOrigem.toFixed(2)}</div></div>
+                    <div class="pdf-stat"><div class="label">Valor no Destino</div><div class="value">R$ ${valorTotalDestino.toFixed(2)}</div></div>
+                </div>
+            `;
+
+            if (!filtered.length) {
+                html += '<p style="text-align:center;padding:25px;">Nenhuma transferência encontrada para os filtros selecionados.</p>';
+            } else {
+                html += `<div class="table-responsive"><table>
+                    <thead><tr>
+                        <th>Data</th><th>ID Transferência</th><th>Origem</th><th>Destino</th>
+                        <th>Pneu</th><th>Qtd.</th><th>Valor Origem</th><th>Acréscimo</th><th>Valor Destino</th>
+                    </tr></thead><tbody>`;
+
+                filtered.forEach(t => {
+                    t.itens.forEach((item, index) => {
+                        html += `<tr>
+                            ${index === 0 ? `<td rowspan="${t.itens.length}">${new Date(t.data).toLocaleString('pt-BR')}</td>
+                            <td rowspan="${t.itens.length}"><strong>${t.transferenciaId}</strong></td>
+                            <td rowspan="${t.itens.length}">${t.origemNome}</td>
+                            <td rowspan="${t.itens.length}">${t.destinoNome}</td>` : ''}
+                            <td>${item.produtoDescricao}</td>
+                            <td style="text-align:center;">${item.quantidade}</td>
+                            <td>R$ ${item.valorUnitarioOrigem.toFixed(2)}</td>
+                            <td>R$ ${item.incrementoValor.toFixed(2)}</td>
+                            <td>R$ ${item.valorUnitario.toFixed(2)}</td>
+                        </tr>`;
+                    });
+                });
+
+                html += `</tbody></table></div>`;
+            }
+
+            html += '<div class="pdf-footer">Sistema de Gerenciamento de Pneus - Documento exclusivo de Transferências de Estoque</div>';
+            container.innerHTML = html;
+
+            // Os cards passam a representar somente o resultado filtrado das transferências.
+            document.getElementById('vendasMes').textContent = totalTransferencias;
+            document.getElementById('vendasAno').textContent = totalPneus;
+            document.getElementById('totalEstoque').textContent = totalTransferencias;
+            document.getElementById('faturamentoTotal').textContent = `R$ ${valorTotalDestino.toFixed(2)}`;
+        }
+
+        function gerarPDFTransferencias() {
+            const element = document.getElementById('relatorioContent');
+            if (!element) return;
+
+            const btn = document.querySelector('#acoesRelatorioTransferencias .btn-pdf');
+            const originalText = btn ? btn.textContent : '';
+
+            if (btn) {
+                btn.textContent = '⏳ Gerando PDF...';
+                btn.disabled = true;
+            }
+
+            html2canvas(element, {
+                scale: 2,
+                useCORS: true,
+                allowTaint: true,
+                backgroundColor: '#ffffff',
+                logging: false
+            }).then(canvas => {
+                const imgData = canvas.toDataURL('image/png');
+                const { jsPDF } = window.jspdf;
+                const pdf = new jsPDF('p', 'mm', 'a4');
+                const imgWidth = 210;
+                const pageHeight = 297;
+                const imgHeight = (canvas.height * imgWidth) / canvas.width;
+                let heightLeft = imgHeight;
+                let position = 0;
+
+                pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+                heightLeft -= pageHeight;
+
+                while (heightLeft > 0) {
+                    position = heightLeft - imgHeight;
+                    pdf.addPage();
+                    pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+                    heightLeft -= pageHeight;
+                }
+
+                const hoje = new Date().toISOString().slice(0, 10);
+                pdf.save(`Transferencias_de_Estoque_${filialAtual}_${hoje}.pdf`);
+
+                if (btn) {
+                    btn.textContent = originalText;
+                    btn.disabled = false;
+                }
+            }).catch(error => {
+                console.error('Erro ao gerar PDF de transferências:', error);
+                alert('Erro ao gerar o PDF das transferências. Tente novamente.');
+
+                if (btn) {
+                    btn.textContent = originalText;
+                    btn.disabled = false;
+                }
+            });
         }
 
         // ===== FUNÇÃO MODIFICADA: RELATÓRIO DE VENDAS COM NOME COMPLETO DO PRODUTO =====
