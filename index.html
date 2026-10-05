@@ -1894,8 +1894,18 @@
                 </div>
 
                 <div class="form-row">
-                    <div class="form-group" style="flex:1;"><label>Valor de Venda (R$)</label><input type="number" id="estoqueValorVenda" step="0.01" min="0" placeholder="0,00"></div>
-                    <div class="form-group" style="flex:1;"><label>Valor Mínimo de Venda (R$)</label><input type="number" id="estoqueValorMinimoVenda" step="0.01" min="0" placeholder="0,00"></div>
+                    <div class="form-group" style="flex:1;">
+                        <label>Valor de Venda</label>
+                        <div style="display:flex; gap:8px;"><input type="number" id="estoqueValorVenda" step="0.01" min="0" placeholder="Valor" oninput="atualizarPreviewValoresVendaCadastro()" style="flex:1;">
+                        <select id="estoqueMoedaVenda" onchange="atualizarPreviewValoresVendaCadastro()" style="flex:0 0 100px;"><option value="BRL">R$</option><option value="USD">US$</option></select></div>
+                        <small id="previewValorVenda" style="display:block; margin-top:5px; color:#666;"></small>
+                    </div>
+                    <div class="form-group" style="flex:1;">
+                        <label>Valor Mínimo de Venda</label>
+                        <div style="display:flex; gap:8px;"><input type="number" id="estoqueValorMinimoVenda" step="0.01" min="0" placeholder="Valor" oninput="atualizarPreviewValoresVendaCadastro()" style="flex:1;">
+                        <select id="estoqueMoedaMinimoVenda" onchange="atualizarPreviewValoresVendaCadastro()" style="flex:0 0 100px;"><option value="BRL">R$</option><option value="USD">US$</option></select></div>
+                        <small id="previewValorMinimoVenda" style="display:block; margin-top:5px; color:#666;"></small>
+                    </div>
                 </div>
 
                 <div class="form-group">
@@ -2094,8 +2104,18 @@
                 </div>
 
                 <div class="form-row">
-                    <div class="form-group" style="flex:1;"><label>Valor de Venda (R$)</label><input type="number" id="alterarValorVenda" step="0.01" min="0" placeholder="0,00"></div>
-                    <div class="form-group" style="flex:1;"><label>Valor Mínimo de Venda (R$)</label><input type="number" id="alterarValorMinimoVenda" step="0.01" min="0" placeholder="0,00"></div>
+                    <div class="form-group" style="flex:1;">
+                        <label>Valor de Venda</label>
+                        <div style="display:flex; gap:8px;"><input type="number" id="alterarValorVenda" step="0.01" min="0" placeholder="Valor" oninput="atualizarPreviewValoresVendaAlterar()" style="flex:1;">
+                        <select id="alterarMoedaVenda" onchange="atualizarPreviewValoresVendaAlterar()" style="flex:0 0 100px;"><option value="BRL">R$</option><option value="USD">US$</option></select></div>
+                        <small id="previewAlterarValorVenda" style="display:block; margin-top:5px; color:#666;"></small>
+                    </div>
+                    <div class="form-group" style="flex:1;">
+                        <label>Valor Mínimo de Venda</label>
+                        <div style="display:flex; gap:8px;"><input type="number" id="alterarValorMinimoVenda" step="0.01" min="0" placeholder="Valor" oninput="atualizarPreviewValoresVendaAlterar()" style="flex:1;">
+                        <select id="alterarMoedaMinimoVenda" onchange="atualizarPreviewValoresVendaAlterar()" style="flex:0 0 100px;"><option value="BRL">R$</option><option value="USD">US$</option></select></div>
+                        <small id="previewAlterarValorMinimoVenda" style="display:block; margin-top:5px; color:#666;"></small>
+                    </div>
                 </div>
 
                 <div class="form-group">
@@ -2510,8 +2530,8 @@
             setCotacao(valor);
             salvarDadosFirebase();
             atualizarDisplayCotacao();
-            atualizarPreviewValor();
-            updateTotalPreview();
+            atualizarPreviewValor(); atualizarPreviewValoresVendaCadastro(); atualizarPreviewValoresVendaAlterar(); updateTotalPreview();
+            if (dadosCarregados) loadEstoque();
             alert(`Cotação do dólar salva: R$ ${valor.toFixed(4)}`);
         }
 
@@ -2559,6 +2579,40 @@
                 return `US$ ${valor.toFixed(2)}`;
             }
             return `R$ ${valor.toFixed(2)}`;
+        }
+
+        function obterValoresVendaDupla(item, tipo = 'venda') {
+            const cot = getCotacao();
+            const prefixo = tipo === 'minimo' ? 'valorMinimoVenda' : 'valorVenda';
+            const brlSalvo = Number(item?.[prefixo]) || 0;
+            const usdSalvo = Number(item?.[`${prefixo}USD`]) || 0;
+            const moedaOriginal = item?.[`${prefixo}MoedaOriginal`] || 'BRL';
+            const cotacaoOriginal = Number(item?.[`${prefixo}CotacaoUsada`]) || Number(item?.cotacaoUsada) || 0;
+            if (moedaOriginal === 'USD' && usdSalvo > 0) {
+                const taxa = Number(cot.valor) || cotacaoOriginal;
+                return { brl: taxa > 0 ? usdSalvo * taxa : brlSalvo, usd: usdSalvo };
+            }
+            return { brl: brlSalvo, usd: Number(cot.valor) > 0 ? brlSalvo / Number(cot.valor) : 0 };
+        }
+        function obterValorVendaBRLAtual(item, tipo = 'venda') {
+            return obterValoresVendaDupla(item, tipo).brl;
+        }
+        function formatarDuplaVenda(valor, moeda, cot) {
+            const n = Number(valor) || 0, taxa = Number(cot?.valor) || 0;
+            if (moeda === 'USD') return taxa > 0 ? `US$ ${n.toFixed(2)} → R$ ${(n*taxa).toFixed(2)} (cotação R$ ${taxa.toFixed(4)})` : `US$ ${n.toFixed(2)} → defina a cotação para ver em R$`;
+            return taxa > 0 ? `R$ ${n.toFixed(2)} → US$ ${(n/taxa).toFixed(2)} (cotação R$ ${taxa.toFixed(4)})` : `R$ ${n.toFixed(2)} → defina a cotação para ver em US$`;
+        }
+        function atualizarPreviewValoresVendaCadastro() {
+            const cot=getCotacao(), v=Number(document.getElementById('estoqueValorVenda')?.value)||0, m=Number(document.getElementById('estoqueValorMinimoVenda')?.value)||0;
+            const mv=document.getElementById('estoqueMoedaVenda')?.value||'BRL', mm=document.getElementById('estoqueMoedaMinimoVenda')?.value||'BRL';
+            const pv=document.getElementById('previewValorVenda'), pm=document.getElementById('previewValorMinimoVenda');
+            if(pv) pv.textContent=v>0?formatarDuplaVenda(v,mv,cot):''; if(pm) pm.textContent=m>0?formatarDuplaVenda(m,mm,cot):'';
+        }
+        function atualizarPreviewValoresVendaAlterar() {
+            const cot=getCotacao(), v=Number(document.getElementById('alterarValorVenda')?.value)||0, m=Number(document.getElementById('alterarValorMinimoVenda')?.value)||0;
+            const mv=document.getElementById('alterarMoedaVenda')?.value||'BRL', mm=document.getElementById('alterarMoedaMinimoVenda')?.value||'BRL';
+            const pv=document.getElementById('previewAlterarValorVenda'), pm=document.getElementById('previewAlterarValorMinimoVenda');
+            if(pv) pv.textContent=v>0?formatarDuplaVenda(v,mv,cot):''; if(pm) pm.textContent=m>0?formatarDuplaVenda(m,mm,cot):'';
         }
 
         function atualizarPreviewValor() {
@@ -3088,6 +3142,11 @@
                     document.getElementById('estoqueMarcaCustom').style.display = 'none';
                     document.getElementById('previewValorConvertido').style.display = 'none';
                     document.getElementById('estoqueValor').value = '';
+                    document.getElementById('estoqueValorVenda').value = '';
+                    document.getElementById('estoqueValorMinimoVenda').value = '';
+                    document.getElementById('estoqueMoedaVenda').value = 'BRL';
+                    document.getElementById('estoqueMoedaMinimoVenda').value = 'BRL';
+                    atualizarPreviewValoresVendaCadastro();
                 }
                 if (id === 'modalIncluirEstoque') {
                     document.getElementById('incluirPreview').style.display = 'none';
@@ -3145,8 +3204,9 @@
             document.getElementById('incluirProdutoNome').textContent = nomeProduto;
             document.getElementById('incluirQtdAtual').textContent = produto.quantidade;
             document.getElementById('incluirValorMedioAtual').textContent = `R$ ${produto.valorCompra.toFixed(2)}`;
-            document.getElementById('incluirValorVendaAtual').textContent = `R$ ${(produto.valorVenda || 0).toFixed(2)}`;
-            document.getElementById('incluirValorMinimoVendaAtual').textContent = `R$ ${(produto.valorMinimoVenda || 0).toFixed(2)}`;
+            const iv=obterValoresVendaDupla(produto,'venda'), im=obterValoresVendaDupla(produto,'minimo');
+            document.getElementById('incluirValorVendaAtual').textContent = `R$ ${iv.brl.toFixed(2)} | US$ ${iv.usd.toFixed(2)}`;
+            document.getElementById('incluirValorMinimoVendaAtual').textContent = `R$ ${im.brl.toFixed(2)} | US$ ${im.usd.toFixed(2)}`;
             
             const valorTotal = produto.quantidade * produto.valorCompra;
             document.getElementById('incluirValorTotalAtual').textContent = `R$ ${valorTotal.toFixed(2)}`;
@@ -3319,8 +3379,14 @@
             document.getElementById('alterarProfundidade').value = produto.profundidade || '';
             document.getElementById('alterarQuantidade').value = produto.quantidade || 0;
             document.getElementById('alterarValor').value = produto.valorCompra || 0;
-            document.getElementById('alterarValorVenda').value = produto.valorVenda || 0;
-            document.getElementById('alterarValorMinimoVenda').value = produto.valorMinimoVenda || 0;
+            const av = obterValoresVendaDupla(produto,'venda'), am = obterValoresVendaDupla(produto,'minimo');
+            const amv = produto.valorVendaMoedaOriginal === 'USD' ? 'USD' : 'BRL';
+            const amm = produto.valorMinimoVendaMoedaOriginal === 'USD' ? 'USD' : 'BRL';
+            document.getElementById('alterarMoedaVenda').value = amv;
+            document.getElementById('alterarMoedaMinimoVenda').value = amm;
+            document.getElementById('alterarValorVenda').value = amv === 'USD' ? (Number(produto.valorVendaUSD)||av.usd||0) : (Number(produto.valorVenda)||0);
+            document.getElementById('alterarValorMinimoVenda').value = amm === 'USD' ? (Number(produto.valorMinimoVendaUSD)||am.usd||0) : (Number(produto.valorMinimoVenda)||0);
+            atualizarPreviewValoresVendaAlterar();
             
             // Esconder campos custom
             document.getElementById('alterarMarcaCustom').style.display = 'none';
@@ -3386,8 +3452,18 @@
             
             const quantidade = parseInt(document.getElementById('alterarQuantidade').value);
             const valor = parseFloat(document.getElementById('alterarValor').value);
-            const valorVenda = parseFloat(document.getElementById('alterarValorVenda').value) || 0;
-            const valorMinimoVenda = parseFloat(document.getElementById('alterarValorMinimoVenda').value) || 0;
+            const valorVendaInformado = parseFloat(document.getElementById('alterarValorVenda').value) || 0;
+            const valorMinimoVendaInformado = parseFloat(document.getElementById('alterarValorMinimoVenda').value) || 0;
+            const moedaVenda = document.getElementById('alterarMoedaVenda').value || 'BRL';
+            const moedaMinimoVenda = document.getElementById('alterarMoedaMinimoVenda').value || 'BRL';
+            const cot = getCotacao();
+            if ((moedaVenda === 'USD' || moedaMinimoVenda === 'USD') && cot.valor <= 0 &&
+                (valorVendaInformado > 0 || valorMinimoVendaInformado > 0)) {
+                alert('Defina a cotação do dólar antes de informar venda/mínimo em USD.');
+                return;
+            }
+            const valorVenda = moedaVenda === 'USD' ? valorVendaInformado * cot.valor : valorVendaInformado;
+            const valorMinimoVenda = moedaMinimoVenda === 'USD' ? valorMinimoVendaInformado * cot.valor : valorMinimoVendaInformado;
             
             if (!medida || !profundidade || isNaN(quantidade) || quantidade < 0 || !valor || valor <= 0) {
                 alert('Preencha todos os campos corretamente.');
@@ -3415,9 +3491,14 @@
             produto.valorCompra = valor;
             produto.valorVenda = valorVenda;
             produto.valorMinimoVenda = valorMinimoVenda;
+            produto.valorVendaMoedaOriginal = moedaVenda;
+            produto.valorMinimoVendaMoedaOriginal = moedaMinimoVenda;
+            produto.valorVendaUSD = moedaVenda === 'USD' ? Number(valorVendaInformado.toFixed(2)) : 0;
+            produto.valorMinimoVendaUSD = moedaMinimoVenda === 'USD' ? Number(valorMinimoVendaInformado.toFixed(2)) : 0;
+            produto.valorVendaCotacaoUsada = cot.valor > 0 ? cot.valor : null;
+            produto.valorMinimoVendaCotacaoUsada = cot.valor > 0 ? cot.valor : null;
             
             // Atualizar valor em USD médio
-            const cot = getCotacao();
             if (produto.valorUSD !== undefined && cot.valor > 0) {
                 produto.valorUSD = parseFloat((valor / cot.valor).toFixed(2));
             }
@@ -3522,14 +3603,21 @@
             const valorVendaInformado = parseFloat(document.getElementById('estoqueValorVenda').value) || 0;
             const valorMinimoVendaInformado = parseFloat(document.getElementById('estoqueValorMinimoVenda').value) || 0;
             const moeda = document.getElementById('estoqueMoeda').value;
+            const moedaVenda = document.getElementById('estoqueMoedaVenda').value || 'BRL';
+            const moedaMinimoVenda = document.getElementById('estoqueMoedaMinimoVenda').value || 'BRL';
+            const cotVenda = getCotacao();
 
             if (!quantidade || !valorCompra) {
                 alert('Preencha todos os campos.');
                 return;
             }
-            if (valorMinimoVendaInformado > 0 && valorVendaInformado > 0 && valorMinimoVendaInformado > valorVendaInformado) {
-                alert('O valor mínimo de venda não pode ser maior que o valor de venda.');
-                return;
+            if ((moedaVenda === 'USD' || moedaMinimoVenda === 'USD') && cotVenda.valor <= 0 && (valorVendaInformado > 0 || valorMinimoVendaInformado > 0)) {
+                alert('Defina a cotação do dólar antes de informar venda/mínimo em USD.'); return;
+            }
+            const valorVendaBRL = moedaVenda === 'USD' ? valorVendaInformado * cotVenda.valor : valorVendaInformado;
+            const valorMinimoVendaBRL = moedaMinimoVenda === 'USD' ? valorMinimoVendaInformado * cotVenda.valor : valorMinimoVendaInformado;
+            if (valorMinimoVendaBRL > 0 && valorVendaBRL > 0 && valorMinimoVendaBRL > valorVendaBRL) {
+                alert('O valor mínimo de venda não pode ser maior que o valor de venda.'); return;
             }
 
             let valorEmBRL = valorCompra;
@@ -3594,8 +3682,14 @@
                     quantidade,
                     valorCompra: valorEmBRL,
                     valorUSD: valorEmUSD,
-                    valorVenda: valorVendaInformado,
-                    valorMinimoVenda: valorMinimoVendaInformado,
+                    valorVenda: valorVendaBRL,
+                    valorMinimoVenda: valorMinimoVendaBRL,
+                    valorVendaUSD: moedaVenda === 'USD' ? Number(valorVendaInformado.toFixed(2)) : 0,
+                    valorMinimoVendaUSD: moedaMinimoVenda === 'USD' ? Number(valorMinimoVendaInformado.toFixed(2)) : 0,
+                    valorVendaMoedaOriginal: moedaVenda,
+                    valorMinimoVendaMoedaOriginal: moedaMinimoVenda,
+                    valorVendaCotacaoUsada: cotVenda.valor > 0 ? cotVenda.valor : null,
+                    valorMinimoVendaCotacaoUsada: cotVenda.valor > 0 ? cotVenda.valor : null,
                     moeda: 'BRL',
                     moedaOriginal: moeda,
                     cotacaoUsada: cotacaoUsada || null,
@@ -4023,8 +4117,8 @@
                             <td>${item.profundidade}</td>
                             <td>${item.quantidade}</td>
                             ${adminEstoque ? `<td>${valorDisplay}</td>` : ''}
-                            <td>R$ ${(item.valorVenda || 0).toFixed(2)}</td>
-                            <td>R$ ${(item.valorMinimoVenda || 0).toFixed(2)}</td>
+                            <td>${(() => { const v=obterValoresVendaDupla(item,'venda'); return `R$ ${v.brl.toFixed(2)}<br><span class="valor-dolar">US$ ${v.usd.toFixed(2)}</span>`; })()}</td>
+                            <td>${(() => { const v=obterValoresVendaDupla(item,'minimo'); return `R$ ${v.brl.toFixed(2)}<br><span class="valor-dolar">US$ ${v.usd.toFixed(2)}</span>`; })()}</td>
                             <td>${moedaDisplay}</td>
                             <td>
                                 <button class="btn btn-incluir" onclick="abrirModalIncluir(${item.id})">➕ Incluir</button>
@@ -4340,8 +4434,8 @@
                 if (e.quantidade > 0) {
                     const option = document.createElement('option');
                     option.value = e.id;
-                    option.dataset.valorVenda = e.valorVenda || 0;
-                    option.dataset.valorMinimoVenda = e.valorMinimoVenda || 0;
+                    option.dataset.valorVenda = obterValorVendaBRLAtual(e, 'venda');
+                    option.dataset.valorMinimoVenda = obterValorVendaBRLAtual(e, 'minimo');
                     const marcaDisplay = e.marca ? e.marca + ' ' : '';
                     option.textContent = `${marcaDisplay}${e.medida} - ${e.profundidade} (Qtd: ${e.quantidade})`;
                     select.appendChild(option);
@@ -4496,7 +4590,7 @@
                     return;
                 }
 
-                const valorMinimoVenda = Number(pneu.valorMinimoVenda || 0);
+                const valorMinimoVenda = obterValorVendaBRLAtual(pneu, 'minimo');
                 if (valorMinimoVenda > 0) {
                     const valorBRLParaValidacao = moeda === 'USD' ? valorUnitario * cot.valor : valorUnitario;
                     if (valorBRLParaValidacao + 0.001 < valorMinimoVenda) {
