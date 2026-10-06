@@ -4590,15 +4590,6 @@
                     return;
                 }
 
-                const valorMinimoVenda = obterValorVendaBRLAtual(pneu, 'minimo');
-                if (valorMinimoVenda > 0) {
-                    const valorBRLParaValidacao = moeda === 'USD' ? valorUnitario * cot.valor : valorUnitario;
-                    if (valorBRLParaValidacao + 0.001 < valorMinimoVenda) {
-                        alert(`O valor de venda não pode ser menor que o valor mínimo cadastrado: R$ ${valorMinimoVenda.toFixed(2)}.`);
-                        return;
-                    }
-                }
-
                 let valorEmBRL = valorUnitario;
                 let valorEmUSD = null;
                 
