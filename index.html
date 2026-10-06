@@ -1805,8 +1805,31 @@
             <input type="hidden" id="baixaCarteiraId">
             <div id="baixaPagamentosContainer"></div>
             <button type="button" class="btn btn-info" onclick="adicionarPagamentoBaixaCarteira()">+ Adicionar forma de pagamento</button>
+
+            <!-- Desconto opcional na baixa -->
+            <div id="baixaDescontoBox" style="margin-top:18px;padding:14px;background:#fff8e1;border:1px solid #ffe082;border-radius:8px;">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;color:#e65100;margin-bottom:10px;">
+                    <input type="checkbox" id="baixaDescontoAtivo" onchange="toggleDescontoBaixaCarteira()">
+                    🏷️ Conceder desconto nesta baixa
+                </label>
+                <div id="baixaDescontoCampos" style="display:none;">
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:end;">
+                        <div class="form-group" style="margin:0;">
+                            <label>Valor do desconto (R$)</label>
+                            <input type="number" id="baixaDescontoValor" min="0" step="0.01" placeholder="0,00" oninput="atualizarResumoBaixaCarteira()">
+                        </div>
+                        <div class="form-group" style="margin:0;">
+                            <label>Motivo do desconto (opcional)</label>
+                            <input type="text" id="baixaDescontoMotivo" placeholder="Ex: acordo comercial, fidelidade...">
+                        </div>
+                    </div>
+                    <small style="display:block;margin-top:8px;color:#666;">O desconto reduz o saldo a receber. Você pode receber parte e abater o restante com desconto.</small>
+                </div>
+            </div>
+
             <div style="margin-top:15px;padding:12px;background:#eef7ee;border-radius:8px;">
-                <div><strong>Total desta baixa:</strong> <span id="baixaTotalBRL">R$ 0,00</span></div>
+                <div><strong>Total recebido:</strong> <span id="baixaTotalBRL">R$ 0,00</span></div>
+                <div id="baixaDescontoLinha" style="display:none;"><strong>Desconto concedido:</strong> <span id="baixaDescontoBRL" style="color:#e65100;">R$ 0,00</span></div>
                 <div><strong>Saldo após esta baixa:</strong> <span id="baixaSaldoBRL">R$ 0,00</span></div>
             </div>
             <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px;">
@@ -6206,6 +6229,23 @@
             document.getElementById('baixaPagamentosContainer').appendChild(criarLinhaBaixaCarteira());
         }
 
+        function toggleDescontoBaixaCarteira() {
+            const ativo = document.getElementById('baixaDescontoAtivo')?.checked;
+            const campos = document.getElementById('baixaDescontoCampos');
+            if (campos) campos.style.display = ativo ? 'block' : 'none';
+            if (!ativo) {
+                const input = document.getElementById('baixaDescontoValor');
+                if (input) input.value = '';
+            }
+            atualizarResumoBaixaCarteira();
+        }
+
+        function getDescontoBaixaCarteira() {
+            const ativo = document.getElementById('baixaDescontoAtivo')?.checked;
+            if (!ativo) return 0;
+            return Math.max(0, parseFloat(document.getElementById('baixaDescontoValor')?.value) || 0);
+        }
+
         function atualizarResumoBaixaCarteira() {
             const registro = getCarteira().find(c => c.id === parseInt(document.getElementById('baixaCarteiraId')?.value));
             if (!registro) return;
@@ -6216,18 +6256,41 @@
                 const moeda = item.querySelector('.baixaMoeda')?.value || 'BRL';
                 totalBRL += moeda === 'USD' ? valor * cot : valor;
             });
+            const desconto = getDescontoBaixaCarteira();
+            const saldoAtual = getSaldoCarteira(registro);
             document.getElementById('baixaTotalBRL').textContent = `${formatMoneyBRL(totalBRL)}${cot ? ` (cotação US$ ${cot.toFixed(4)})` : ''}`;
-            document.getElementById('baixaSaldoBRL').textContent = formatMoneyBRL(Math.max(0, getSaldoCarteira(registro) - totalBRL));
+            const linhaDesconto = document.getElementById('baixaDescontoLinha');
+            const elDesconto = document.getElementById('baixaDescontoBRL');
+            if (linhaDesconto && elDesconto) {
+                if (desconto > 0) {
+                    linhaDesconto.style.display = 'block';
+                    elDesconto.textContent = formatMoneyBRL(desconto);
+                } else {
+                    linhaDesconto.style.display = 'none';
+                    elDesconto.textContent = formatMoneyBRL(0);
+                }
+            }
+            document.getElementById('baixaSaldoBRL').textContent = formatMoneyBRL(Math.max(0, saldoAtual - totalBRL - desconto));
         }
 
         function resumoFormaPagamento(item) {
-            const metodo = item.querySelector('.baixaMetodo').value;
-            const moeda = item.querySelector('.baixaMoeda').value;
-            const valor = parseFloat(item.querySelector('.baixaValor').value) || 0;
-            const moedaTxt = moeda === 'USD' ? 'US$' : 'R$';
-            let resumo = `${metodo}: ${moedaTxt} ${valor.toFixed(2)}`;
-            if (metodo === 'Cheque') resumo += ` (Cheque ${item.querySelector('.baixaChequeNumero')?.value || ''})`;
-            return resumo;
+            // Aceita tanto elemento DOM quanto objeto de dados
+            if (item && typeof item.querySelector === 'function') {
+                const metodo = item.querySelector('.baixaMetodo').value;
+                const moeda = item.querySelector('.baixaMoeda').value;
+                const valor = parseFloat(item.querySelector('.baixaValor').value) || 0;
+                const moedaTxt = moeda === 'USD' ? 'US$' : 'R$';
+                let resumo = `${metodo}: ${moedaTxt} ${valor.toFixed(2)}`;
+                if (metodo === 'Cheque') resumo += ` (Cheque ${item.querySelector('.baixaChequeNumero')?.value || ''})`;
+                return resumo;
+            }
+            if (item && item.metodo) {
+                const moedaTxt = item.moeda === 'USD' ? 'US$' : 'R$';
+                let resumo = `${item.metodo}: ${moedaTxt} ${(Number(item.valor) || 0).toFixed(2)}`;
+                if (item.metodo === 'Cheque' && item.chequeNumero) resumo += ` (Cheque ${item.chequeNumero})`;
+                return resumo;
+            }
+            return '';
         }
 
         function abrirBaixaCarteira(id) {
@@ -6241,6 +6304,15 @@
             document.getElementById('baixaPagamentosContainer').innerHTML = '';
             adicionarPagamentoBaixaCarteira();
             document.getElementById('baixaPagamentosContainer').querySelector('.baixaValor').value = '';
+            // Reset desconto
+            const chk = document.getElementById('baixaDescontoAtivo');
+            if (chk) chk.checked = false;
+            const campos = document.getElementById('baixaDescontoCampos');
+            if (campos) campos.style.display = 'none';
+            const descontoValor = document.getElementById('baixaDescontoValor');
+            if (descontoValor) descontoValor.value = '';
+            const descontoMotivo = document.getElementById('baixaDescontoMotivo');
+            if (descontoMotivo) descontoMotivo.value = '';
             atualizarResumoBaixaCarteira();
             const modal = document.getElementById('modalBaixaCarteira');
             if (modal) {
@@ -6263,6 +6335,8 @@
             const cot = getCotacao().valor || 0;
             const pagamentos = [];
             let totalBRL = 0;
+            const desconto = getDescontoBaixaCarteira();
+            const motivoDesconto = (document.getElementById('baixaDescontoMotivo')?.value || '').trim();
 
             try {
                 const itens = document.querySelectorAll('#baixaPagamentosContainer .baixa-pagamento-item');
@@ -6288,19 +6362,49 @@
                 return;
             }
 
-            if (!pagamentos.length) { alert('Informe pelo menos um pagamento.'); return; }
-            if (totalBRL > saldoAtual + 0.01) { alert(`O recebimento (${formatMoneyBRL(totalBRL)}) é maior que o saldo da carteira (${formatMoneyBRL(saldoAtual)}).`); return; }
-            if (Math.abs(totalBRL - saldoAtual) > 0.01 && !confirm(`Este pagamento será PARCIAL.\n\nRecebido: ${formatMoneyBRL(totalBRL)}\nSaldo restante: ${formatMoneyBRL(saldoAtual-totalBRL)}\n\nDeseja continuar?`)) return;
+            if (!pagamentos.length && desconto <= 0) {
+                alert('Informe pelo menos um pagamento ou um desconto.');
+                return;
+            }
+            if (desconto > 0 && !document.getElementById('baixaDescontoAtivo')?.checked) {
+                alert('Marque a opção de conceder desconto e informe o valor.');
+                return;
+            }
+            if (totalBRL + desconto > saldoAtual + 0.01) {
+                alert(`O total (recebido + desconto) (${formatMoneyBRL(totalBRL + desconto)}) é maior que o saldo da carteira (${formatMoneyBRL(saldoAtual)}).`);
+                return;
+            }
+
+            const saldoApos = Math.max(0, saldoAtual - totalBRL - desconto);
+            const isParcial = saldoApos > 0.01;
+            let msgConfirm = '';
+            if (desconto > 0) {
+                msgConfirm = `Confirmar baixa?\n\nRecebido: ${formatMoneyBRL(totalBRL)}\nDesconto: ${formatMoneyBRL(desconto)}${motivoDesconto ? ` (${motivoDesconto})` : ''}\nSaldo restante: ${formatMoneyBRL(saldoApos)}`;
+            } else if (isParcial) {
+                msgConfirm = `Este pagamento será PARCIAL.\n\nRecebido: ${formatMoneyBRL(totalBRL)}\nSaldo restante: ${formatMoneyBRL(saldoApos)}\n\nDeseja continuar?`;
+            }
+            if (msgConfirm && !confirm(msgConfirm)) return;
 
             const agora = new Date().toISOString();
+            let resumoPartes = pagamentos.map(resumoFormaPagamento);
+            if (desconto > 0) {
+                resumoPartes.push(`Desconto: R$ ${desconto.toFixed(2)}${motivoDesconto ? ` (${motivoDesconto})` : ''}`);
+            }
             const novaBaixa = {
-                id: Date.now(), data: agora, usuario: usuarioLogado ? usuarioLogado.nome : '',
-                pagamentos, totalBRL, resumo: pagamentos.map(resumoFormaPagamento).join(' + ')
+                id: Date.now(),
+                data: agora,
+                usuario: usuarioLogado ? usuarioLogado.nome : '',
+                pagamentos,
+                totalBRL,
+                desconto: desconto > 0 ? desconto : 0,
+                motivoDesconto: desconto > 0 ? motivoDesconto : '',
+                resumo: resumoPartes.join(' + ')
             };
             if (!Array.isArray(registro.baixas)) registro.baixas = [];
             registro.baixas.push(novaBaixa);
             registro.valorPagoAcumuladoBRL = (parseFloat(registro.valorPagoAcumuladoBRL) || 0) + totalBRL;
-            registro.saldoRestanteBRL = Math.max(0, saldoAtual - totalBRL);
+            registro.descontoAcumuladoBRL = (parseFloat(registro.descontoAcumuladoBRL) || 0) + (desconto > 0 ? desconto : 0);
+            registro.saldoRestanteBRL = saldoApos;
             registro.dataUltimaBaixa = agora;
             registro.metodoBaixa = novaBaixa.resumo;
             registro.usuarioBaixa = novaBaixa.usuario;
@@ -6322,7 +6426,13 @@
             await salvarDadosFirebase();
             closeModal('modalBaixaCarteira');
             loadCarteira(); loadVendas();
-            alert(registro.status === 'pago' ? 'Pagamento recebido e carteira quitada com sucesso!' : `Pagamento parcial registrado. Saldo restante: ${formatMoneyBRL(registro.saldoRestanteBRL)}.`);
+            if (registro.status === 'pago') {
+                alert(desconto > 0
+                    ? `Pagamento recebido e carteira quitada!\nDesconto concedido: ${formatMoneyBRL(desconto)}`
+                    : 'Pagamento recebido e carteira quitada com sucesso!');
+            } else {
+                alert(`Baixa parcial registrada.\nRecebido: ${formatMoneyBRL(totalBRL)}${desconto > 0 ? `\nDesconto: ${formatMoneyBRL(desconto)}` : ''}\nSaldo restante: ${formatMoneyBRL(registro.saldoRestanteBRL)}.`);
+            }
         }
 
         // =========================================================================
