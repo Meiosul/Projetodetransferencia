@@ -1528,6 +1528,7 @@
         <div class="tabs">
             <button class="tab-btn active" data-tab="estoque">📦 Estoque</button>
             <button class="tab-btn" data-tab="vendas">💰 Vendas</button>
+            <button class="tab-btn" data-tab="recebimentos">💵 Recebimentos</button>
             <button class="tab-btn" data-tab="clientes">👤 Clientes</button>
             <button class="tab-btn" data-tab="despesas" id="tabDespesas">💸 Despesas</button>
             <button class="tab-btn" data-tab="relatorios" id="tabRelatorios">📊 Relatórios</button>
@@ -1585,6 +1586,25 @@
                 <button class="btn btn-success" onclick="openModal('modalVenda')">+ Nova Venda</button>
             </div>
             <div id="vendasTable"></div>
+        </div>
+
+        <!-- ==================== ABA RECEBIMENTOS ==================== -->
+        <div class="tab-content" id="recebimentos">
+            <h2 style="color:#1a237e;margin-bottom:15px;">💵 Gerenciamento de Recebimentos</h2>
+            <p style="color:#666;margin-bottom:18px;">Entradas registradas a partir das vendas e das baixas da carteira. Valores em carteira só entram aqui quando forem efetivamente recebidos.</p>
+            <div class="stats-grid">
+                <div class="stat-card"><h3>Total recebido (geral)</h3><div class="number" id="recebimentosTotalGeral">R$ 0,00</div></div>
+                <div class="stat-card"><h3>Total no período/filtro</h3><div class="number" id="recebimentosTotalFiltro">R$ 0,00</div></div>
+                <div class="stat-card"><h3>Quantidade de recebimentos</h3><div class="number" id="recebimentosQuantidade">0</div></div>
+            </div>
+            <div class="filters">
+                <div class="form-group"><label>Data inicial</label><input type="date" id="recebimentoDataInicio" onchange="filtrarRecebimentos()"></div>
+                <div class="form-group"><label>Data final</label><input type="date" id="recebimentoDataFim" onchange="filtrarRecebimentos()"></div>
+                <div class="form-group"><label>Forma de recebimento</label><select id="recebimentoMetodo" onchange="filtrarRecebimentos()"><option value="">Todas as formas</option><option>Dinheiro</option><option>Pix</option><option>Cartão</option><option>Cheque</option></select></div>
+                <div class="form-group"><label>Buscar</label><input id="recebimentoBusca" placeholder="Cliente, vendedor, pedido ou venda..." oninput="filtrarRecebimentos()"></div>
+                <button class="btn btn-primary" onclick="limparFiltrosRecebimentos()">Limpar filtros</button>
+            </div>
+            <div id="recebimentosTabela"></div>
         </div>
 
         <!-- ==================== ABA CLIENTES ==================== -->
@@ -2473,6 +2493,7 @@
                 pedidos: [],
                 despesas: [],
                 carteira: [],
+                recebimentos: [],
                 nextEstoqueId: 1,
                 nextVendaId: 1,
                 nextPedidoId: 1,
@@ -2488,6 +2509,7 @@
                 pedidos: [],
                 despesas: [],
                 carteira: [],
+                recebimentos: [],
                 nextEstoqueId: 1,
                 nextVendaId: 1,
                 nextPedidoId: 1,
@@ -2885,6 +2907,18 @@
             return d.carteira;
         }
 
+        function getRecebimentos() {
+            const d = getDadosFilial();
+            if (!Array.isArray(d.recebimentos)) d.recebimentos = [];
+            return d.recebimentos;
+        }
+
+        function registrarRecebimento(dadosRecebimento) {
+            const lista = getRecebimentos();
+            if (dadosRecebimento.sourceKey && lista.some(r => r.sourceKey === dadosRecebimento.sourceKey)) return;
+            lista.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2,8)}`, filial: filialAtual, ...dadosRecebimento });
+        }
+
         function getNextId(tipo) {
             const d = getDadosFilial();
             if (tipo === 'estoque') return d.nextEstoqueId++;
@@ -3129,9 +3163,7 @@
                 if (id === 'modalVenda') {
                     loadVendaSelects();
                     updateTotalPreview();
-                    if (usuarioLogado) {
-                        document.getElementById('vendaVendedor').value = usuarioLogado.nome;
-                    }
+                    document.getElementById('vendaVendedor').value = ''; // preenchimento manual em cada nova venda
                     document.getElementById('vendaLocal').value = 'Sanga Puitã';
                     document.getElementById('vendaLocalOutros').classList.remove('visible');
                     document.getElementById('vendaLocalOutros').value = '';
@@ -4716,6 +4748,13 @@
             };
 
             vendas.push(venda);
+            // Cada parcela efetivamente recebida vira um lançamento próprio no caixa.
+            pagamentos.filter(p => p.metodo !== 'Carteira').forEach((p, i) => registrarRecebimento({
+                sourceKey: `venda:${venda.id}:${venda.pagamentos.indexOf(p)}`, origem: 'Venda', vendaId: venda.id, pedidoNumero: null, clienteId: venda.clienteId,
+                vendedor: venda.vendedor, local: venda.local, metodo: p.metodo, valor: Number(p.valor) || 0,
+                moeda: 'BRL', data: venda.data, detalhe: p.metodo === 'Cheque' ? `Cheque ${p.chequeNumero || ''} - ${p.chequeNome || ''}` : '',
+                usuario: usuarioLogado ? usuarioLogado.nome : ''
+            }));
 
             if (valorCarteira > 0) {
                 const carteira = getCarteira();
@@ -4758,6 +4797,7 @@
             };
 
             pedidos.push(pedido);
+            getRecebimentos().filter(r => r.vendaId === venda.id && !r.pedidoNumero).forEach(r => r.pedidoNumero = pedido.numero);
             const carteiraVenda = getCarteira().filter(c => c.vendaId === venda.id);
             carteiraVenda.forEach(c => c.pedidoNumero = pedido.numero);
 
@@ -6402,6 +6442,14 @@
             };
             if (!Array.isArray(registro.baixas)) registro.baixas = [];
             registro.baixas.push(novaBaixa);
+            pagamentos.forEach((p, i) => {
+                if ((Number(p.valorBRL) || 0) <= 0) return;
+                registrarRecebimento({ sourceKey: `carteira:${registro.id}:${novaBaixa.id}:${i}`, origem: 'Baixa da carteira', vendaId: registro.vendaId, pedidoNumero: registro.pedidoNumero || null,
+                    clienteId: registro.clienteId, vendedor: registro.vendedor, local: registro.local, metodo: p.metodo,
+                    valor: Number(p.valorBRL) || 0, moeda: p.moeda || 'BRL', valorOriginal: Number(p.valor) || 0,
+                    data: agora, detalhe: p.metodo === 'Cheque' ? `Cheque ${p.chequeNumero || ''} - ${p.chequeNome || ''}` : '',
+                    usuario: novaBaixa.usuario });
+            });
             registro.valorPagoAcumuladoBRL = (parseFloat(registro.valorPagoAcumuladoBRL) || 0) + totalBRL;
             registro.descontoAcumuladoBRL = (parseFloat(registro.descontoAcumuladoBRL) || 0) + (desconto > 0 ? desconto : 0);
             registro.saldoRestanteBRL = saldoApos;
@@ -7470,6 +7518,72 @@
         }
 
         // =========================================================================
+        // GERENCIAMENTO DE RECEBIMENTOS
+        // =========================================================================
+        function loadRecebimentos() {
+            // Importa também os recebimentos de vendas antigas que ainda não tinham esta aba.
+            const lista = getRecebimentos();
+            getVendas().forEach(v => (v.pagamentos || []).forEach((p, i) => {
+                if (p.metodo === 'Carteira') return;
+                const key = `venda:${v.id}:${i}`;
+                if (!lista.some(r => r.sourceKey === key)) registrarRecebimento({ sourceKey:key, origem:'Venda', vendaId:v.id,
+                    pedidoNumero:(getPedidos().find(x => x.vendaId === v.id) || {}).numero || null, clienteId:v.clienteId,
+                    vendedor:v.vendedor, local:v.local, metodo:p.metodo, valor:Number(p.valor)||0, moeda:'BRL', data:v.data,
+                    detalhe:p.metodo === 'Cheque' ? `Cheque ${p.chequeNumero || ''} - ${p.chequeNome || ''}` : '', usuario:'' });
+            }));
+            getCarteira().forEach(c => (c.baixas || []).forEach(b => (b.pagamentos || []).forEach((p, i) => {
+                const valor = Number(p.valorBRL) || 0; if (valor <= 0) return;
+                const key = `carteira:${c.id}:${b.id}:${i}`;
+                if (!lista.some(r => r.sourceKey === key)) registrarRecebimento({ sourceKey:key, origem:'Baixa da carteira', vendaId:c.vendaId,
+                    pedidoNumero:c.pedidoNumero || null, clienteId:c.clienteId, vendedor:c.vendedor, local:c.local, metodo:p.metodo,
+                    valor, moeda:p.moeda || 'BRL', valorOriginal:Number(p.valor)||0, data:b.data,
+                    detalhe:p.metodo === 'Cheque' ? `Cheque ${p.chequeNumero || ''} - ${p.chequeNome || ''}` : '', usuario:b.usuario || '' });
+            })));
+            filtrarRecebimentos();
+        }
+
+        function limparFiltrosRecebimentos() {
+            ['recebimentoDataInicio','recebimentoDataFim','recebimentoMetodo','recebimentoBusca'].forEach(id => {
+                const el = document.getElementById(id); if (el) el.value = '';
+            });
+            filtrarRecebimentos();
+        }
+
+        function filtrarRecebimentos() {
+            const todos = getRecebimentos().slice().sort((a,b) => new Date(b.data || 0) - new Date(a.data || 0));
+            const inicio = document.getElementById('recebimentoDataInicio')?.value || '';
+            const fim = document.getElementById('recebimentoDataFim')?.value || '';
+            const metodo = document.getElementById('recebimentoMetodo')?.value || '';
+            const busca = (document.getElementById('recebimentoBusca')?.value || '').trim().toLowerCase();
+            const filtrados = todos.filter(r => {
+                const dia = (r.data || '').slice(0,10);
+                const cliente = clientes.find(c => c.id === r.clienteId);
+                const nome = cliente ? `${cliente.nome || ''} ${cliente.sobrenome || ''}` : '';
+                const texto = `${nome} ${r.vendedor || ''} ${r.pedidoNumero || ''} ${r.vendaId || ''} ${r.metodo || ''} ${r.detalhe || ''} ${r.origem || ''}`.toLowerCase();
+                return (!inicio || dia >= inicio) && (!fim || dia <= fim) && (!metodo || r.metodo === metodo) && (!busca || texto.includes(busca));
+            });
+            const soma = arr => arr.reduce((t,r) => t + (Number(r.valor) || 0), 0);
+            const geralEl = document.getElementById('recebimentosTotalGeral');
+            const filtroEl = document.getElementById('recebimentosTotalFiltro');
+            const qtdEl = document.getElementById('recebimentosQuantidade');
+            if (geralEl) geralEl.textContent = formatMoneyBRL(soma(todos));
+            if (filtroEl) filtroEl.textContent = formatMoneyBRL(soma(filtrados));
+            if (qtdEl) qtdEl.textContent = filtrados.length;
+            const container = document.getElementById('recebimentosTabela');
+            if (!container) return;
+            if (!filtrados.length) { container.innerHTML = '<p style="text-align:center;padding:25px;">Nenhum recebimento encontrado para os filtros selecionados.</p>'; return; }
+            let html = `<div class="table-responsive"><table><thead><tr><th>Data e hora</th><th>Origem</th><th>Pedido/Venda</th><th>Cliente</th><th>Vendedor</th><th>Forma</th><th>Detalhes</th><th>Valor recebido</th><th>Registrado por</th></tr></thead><tbody>`;
+            filtrados.forEach(r => {
+                const c = clientes.find(x => x.id === r.clienteId);
+                const cliente = c ? `${c.nome || ''} ${c.sobrenome || ''}`.trim() : 'N/A';
+                const data = r.data ? new Date(r.data).toLocaleString('pt-BR') : 'N/A';
+                html += `<tr><td>${data}</td><td>${r.origem || 'Venda'}</td><td>${r.pedidoNumero || '-'} / ${r.vendaId || '-'}</td><td>${cliente}</td><td>${r.vendedor || '-'}</td><td>${r.metodo || '-'}</td><td>${r.detalhe || (r.moeda === 'USD' ? `US$ ${Number(r.valorOriginal || 0).toFixed(2)}` : '-')}</td><td style="font-weight:bold;color:#2e7d32;">${formatMoneyBRL(Number(r.valor) || 0)}</td><td>${r.usuario || '-'}</td></tr>`;
+            });
+            html += '</tbody></table></div>';
+            container.innerHTML = html;
+        }
+
+        // =========================================================================
         // TABS - EVENT LISTENERS
         // =========================================================================
         document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -7481,6 +7595,7 @@
                 if (target) target.classList.add('active');
                 if (this.dataset.tab === 'pedidos') carregarPedidos();
                 if (this.dataset.tab === 'carteira') loadCarteira();
+                if (this.dataset.tab === 'recebimentos') loadRecebimentos();
                 if (this.dataset.tab === 'contas') carregarContas();
                 if (this.dataset.tab === 'despesas') {
                     loadDespesas();
