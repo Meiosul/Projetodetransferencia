@@ -1528,7 +1528,7 @@
         <div class="tabs">
             <button class="tab-btn active" data-tab="estoque">📦 Estoque</button>
             <button class="tab-btn" data-tab="vendas">💰 Vendas</button>
-            <button class="tab-btn" data-tab="recebimentos">💵 Recebimentos</button>
+            <button class="tab-btn" data-tab="recebimentos" id="tabRecebimentos" style="display:none;">💵 Recebimentos</button>
             <button class="tab-btn" data-tab="clientes">👤 Clientes</button>
             <button class="tab-btn" data-tab="despesas" id="tabDespesas">💸 Despesas</button>
             <button class="tab-btn" data-tab="relatorios" id="tabRelatorios">📊 Relatórios</button>
@@ -2941,6 +2941,16 @@
 
         function aplicarPermissoesUsuario() {
             const admin = isAdmin();
+            const tabRecebimentos = document.getElementById('tabRecebimentos');
+            const conteudoRecebimentos = document.getElementById('recebimentos');
+            if (tabRecebimentos) tabRecebimentos.style.display = admin ? '' : 'none';
+            if (conteudoRecebimentos && !admin && conteudoRecebimentos.classList.contains('active')) {
+                conteudoRecebimentos.classList.remove('active');
+                const estoqueTab = document.querySelector('.tab-btn[data-tab="estoque"]');
+                const estoqueConteudo = document.getElementById('estoque');
+                if (estoqueTab) estoqueTab.classList.add('active');
+                if (estoqueConteudo) estoqueConteudo.classList.add('active');
+            }
             ['btnAdicionarPneu', 'btnHistoricoEstoque'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.style.display = admin ? '' : 'none';
@@ -3076,6 +3086,8 @@
                 document.getElementById('tabContas').style.display = isAdminUser ? '' : 'none';
                 document.getElementById('tabDespesas').style.display = isAdminUser ? '' : 'none';
                 document.getElementById('tabRelatorios').style.display = isAdminUser ? '' : 'none';
+                document.getElementById('tabRecebimentos').style.display = isAdminUser ? '' : 'none';
+                document.getElementById('recebimentos').style.display = isAdminUser ? '' : 'none';
 
                 carregarTudo();
                 setTimeout(aplicarPermissoesUsuario, 0);
@@ -7521,6 +7533,11 @@
         // GERENCIAMENTO DE RECEBIMENTOS
         // =========================================================================
         function loadRecebimentos() {
+            if (!isAdmin()) {
+                const tab = document.getElementById('recebimentos');
+                if (tab) { tab.classList.remove('active'); tab.style.display = 'none'; }
+                return;
+            }
             // Importa também os recebimentos de vendas antigas que ainda não tinham esta aba.
             const lista = getRecebimentos();
             getVendas().forEach(v => (v.pagamentos || []).forEach((p, i) => {
@@ -7588,6 +7605,10 @@
         // =========================================================================
         document.querySelectorAll('.tab-btn').forEach(btn => {
             btn.addEventListener('click', function() {
+                if (this.dataset.tab === 'recebimentos' && !isAdmin()) {
+                    alert('Apenas o administrador pode acessar os recebimentos.');
+                    return;
+                }
                 document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
                 document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
                 this.classList.add('active');
