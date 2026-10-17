@@ -688,10 +688,15 @@
         .produto-item select,
         .pagamento-item select {
             flex: 2;
-            min-width: 150px;
+            min-width: 120px;
             padding: 8px;
             border: 1px solid #ddd;
             border-radius: 5px;
+        }
+
+        .pagamento-item select.vendaMoedaPagamento {
+            flex: 0 0 90px;
+            min-width: 90px;
         }
 
         .produto-item input,
@@ -2235,6 +2240,10 @@
                                 <option value="Pix">Pix</option>
                                 <option value="Cheque">Cheque</option>
                                 <option value="Carteira">Carteira</option>
+                            </select>
+                            <select class="vendaMoedaPagamento" onchange="updateTotalPreview()" style="flex:0 0 90px;">
+                                <option value="BRL">R$</option>
+                                <option value="USD">US$</option>
                             </select>
                             <input type="number" class="vendaValorPagamento" placeholder="Valor" step="0.01" required>
                             <div class="chequeFields" style="display:none;">
@@ -4538,6 +4547,10 @@
                     <option value="Cheque">Cheque</option>
                     <option value="Carteira">Carteira</option>
                 </select>
+                <select class="vendaMoedaPagamento" onchange="updateTotalPreview()" style="flex:0 0 90px;">
+                    <option value="BRL">R$</option>
+                    <option value="USD">US$</option>
+                </select>
                 <input type="number" class="vendaValorPagamento" placeholder="Valor" step="0.01" required>
                 <div class="chequeFields" style="display:none;">
                     <input type="text" class="vendaChequeNome" placeholder="Nome no Cheque">
@@ -4689,12 +4702,21 @@
             let totalPagamentos = 0;
             for (let item of pagamentoItems) {
                 const metodo = item.querySelector('.vendaMetodo').value;
-                const valor = parseFloat(item.querySelector('.vendaValorPagamento').value);
+                const valorInformado = parseFloat(item.querySelector('.vendaValorPagamento').value);
+                const moedaPagamento = item.querySelector('.vendaMoedaPagamento')?.value || 'BRL';
 
-                if (!valor) {
+                if (!valorInformado || valorInformado <= 0) {
                     alert('Preencha o valor de todos os pagamentos.');
                     return;
                 }
+
+                if (moedaPagamento === 'USD' && cot.valor <= 0) {
+                    alert('Defina a cotação do dólar antes de registrar pagamento em US$.');
+                    return;
+                }
+
+                // Converte sempre para BRL para fechar a venda e o caixa
+                const valorBRL = moedaPagamento === 'USD' ? valorInformado * cot.valor : valorInformado;
 
                 const chequeData = {};
                 if (metodo === 'Cheque') {
@@ -4707,8 +4729,15 @@
                     }
                 }
 
-                pagamentos.push({ metodo, valor, ...chequeData });
-                totalPagamentos += valor;
+                pagamentos.push({
+                    metodo,
+                    valor: valorBRL,                 // sempre em R$ (compatibilidade)
+                    valorOriginal: valorInformado,   // valor digitado
+                    moeda: moedaPagamento,           // BRL ou USD
+                    cotacaoUsada: moedaPagamento === 'USD' ? cot.valor : null,
+                    ...chequeData
+                });
+                totalPagamentos += valorBRL;
             }
 
             if (totalPagamentos > totalVendaBRL + 0.01) {
@@ -4764,7 +4793,8 @@
             pagamentos.filter(p => p.metodo !== 'Carteira').forEach((p, i) => registrarRecebimento({
                 sourceKey: `venda:${venda.id}:${venda.pagamentos.indexOf(p)}`, origem: 'Venda', vendaId: venda.id, pedidoNumero: null, clienteId: venda.clienteId,
                 vendedor: venda.vendedor, local: venda.local, metodo: p.metodo, valor: Number(p.valor) || 0,
-                moeda: 'BRL', data: venda.data, detalhe: p.metodo === 'Cheque' ? `Cheque ${p.chequeNumero || ''} - ${p.chequeNome || ''}` : '',
+                moeda: p.moeda || 'BRL', valorOriginal: p.valorOriginal != null ? p.valorOriginal : Number(p.valor) || 0,
+                data: venda.data, detalhe: p.metodo === 'Cheque' ? `Cheque ${p.chequeNumero || ''} - ${p.chequeNome || ''}` : (p.moeda === 'USD' ? `US$ ${(p.valorOriginal || 0).toFixed(2)}` : ''),
                 usuario: usuarioLogado ? usuarioLogado.nome : ''
             }));
 
@@ -4834,6 +4864,11 @@
                         <option value="Cartão">Cartão</option>
                         <option value="Pix">Pix</option>
                         <option value="Cheque">Cheque</option>
+                        <option value="Carteira">Carteira</option>
+                    </select>
+                    <select class="vendaMoedaPagamento" onchange="updateTotalPreview()" style="flex:0 0 90px;">
+                        <option value="BRL">R$</option>
+                        <option value="USD">US$</option>
                     </select>
                     <input type="number" class="vendaValorPagamento" placeholder="Valor" step="0.01" required>
                     <div class="chequeFields" style="display:none;">
@@ -4907,9 +4942,10 @@
                     return `${nomeCompleto} ${p.quantidade}x ${valorStr}`;
                 }).join(', ');
 
-                const pagamentosStr = venda.pagamentos.map(p =>
-                    `${p.metodo} R$ ${p.valor.toFixed(2)}${p.metodo === 'Cheque' ? ` (${p.chequeNome})` : ''}${p.metodo === 'Carteira' && p.status === 'pago' ? ' (pago)' : ''}`
-                ).join(', ');
+                const pagamentosStr = venda.pagamentos.map(p => {
+                    const moedaTxt = p.moeda === 'USD' ? `US$ ${(p.valorOriginal != null ? p.valorOriginal : p.valor).toFixed(2)} → R$ ${p.valor.toFixed(2)}` : `R$ ${p.valor.toFixed(2)}`;
+                    return `${p.metodo} ${moedaTxt}${p.metodo === 'Cheque' ? ` (${p.chequeNome})` : ''}${p.metodo === 'Carteira' && p.status === 'pago' ? ' (pago)' : ''}`;
+                }).join(', ');
 
                 let moedaDisplay = 'BRL';
                 if (venda.totalUSD) {
@@ -6086,52 +6122,12 @@
             tempContainer.innerHTML = html;
 
             const btn = document.querySelector('#despesas .btn-pdf');
-            if (btn) {
-                const originalText = btn.textContent;
-                btn.textContent = '⏳ Gerando PDF...';
-                btn.disabled = true;
-
-                html2canvas(tempContainer, {
-                    scale: 2,
-                    useCORS: true,
-                    allowTaint: true,
-                    backgroundColor: '#ffffff',
-                    logging: false,
-                    width: 800,
-                    height: tempContainer.scrollHeight
-                }).then(canvas => {
-                    const imgData = canvas.toDataURL('image/png');
-                    const { jsPDF } = window.jspdf;
-                    const pdf = new jsPDF('p', 'mm', 'a4');
-                    const imgWidth = 210;
-                    const pageHeight = 297;
-                    const imgHeight = (canvas.height * imgWidth) / canvas.width;
-                    let heightLeft = imgHeight;
-                    let position = 0;
-
-                    pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-                    heightLeft -= pageHeight;
-
-                    while (heightLeft > 0) {
-                        position = heightLeft - imgHeight;
-                        pdf.addPage();
-                        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-                        heightLeft -= pageHeight;
-                    }
-
-                    pdf.save(`Despesas_${filialAtual}_${new Date().toISOString().slice(0, 10)}.pdf`);
-
-                    btn.textContent = originalText;
-                    btn.disabled = false;
+            const nome = `Despesas_${filialAtual}_${new Date().toISOString().slice(0, 10)}.pdf`;
+            gerarPDFPaginado(tempContainer, nome, btn).finally(() => {
+                if (document.body.contains(tempContainer)) {
                     document.body.removeChild(tempContainer);
-                }).catch(error => {
-                    console.error('Erro ao gerar PDF:', error);
-                    alert('Erro ao gerar PDF. Tente novamente.');
-                    btn.textContent = originalText;
-                    btn.disabled = false;
-                    document.body.removeChild(tempContainer);
-                });
-            }
+                }
+            });
         }
 
         function enviarDespesasWhatsApp() {
@@ -6812,55 +6808,9 @@
             if (!element) return;
 
             const btn = document.querySelector('#acoesRelatorioTransferencias .btn-pdf');
-            const originalText = btn ? btn.textContent : '';
-
-            if (btn) {
-                btn.textContent = '⏳ Gerando PDF...';
-                btn.disabled = true;
-            }
-
-            html2canvas(element, {
-                scale: 2,
-                useCORS: true,
-                allowTaint: true,
-                backgroundColor: '#ffffff',
-                logging: false
-            }).then(canvas => {
-                const imgData = canvas.toDataURL('image/png');
-                const { jsPDF } = window.jspdf;
-                const pdf = new jsPDF('p', 'mm', 'a4');
-                const imgWidth = 210;
-                const pageHeight = 297;
-                const imgHeight = (canvas.height * imgWidth) / canvas.width;
-                let heightLeft = imgHeight;
-                let position = 0;
-
-                pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-                heightLeft -= pageHeight;
-
-                while (heightLeft > 0) {
-                    position = heightLeft - imgHeight;
-                    pdf.addPage();
-                    pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-                    heightLeft -= pageHeight;
-                }
-
-                const hoje = new Date().toISOString().slice(0, 10);
-                pdf.save(`Transferencias_de_Estoque_${filialAtual}_${hoje}.pdf`);
-
-                if (btn) {
-                    btn.textContent = originalText;
-                    btn.disabled = false;
-                }
-            }).catch(error => {
-                console.error('Erro ao gerar PDF de transferências:', error);
-                alert('Erro ao gerar o PDF das transferências. Tente novamente.');
-
-                if (btn) {
-                    btn.textContent = originalText;
-                    btn.disabled = false;
-                }
-            });
+            const hoje = new Date().toISOString().slice(0, 10);
+            const nome = `Transferencias_de_Estoque_${filialAtual}_${hoje}.pdf`;
+            gerarPDFPaginado(element, nome, btn);
         }
 
         // ===== FUNÇÃO MODIFICADA: RELATÓRIO DE VENDAS COM NOME COMPLETO DO PRODUTO =====
@@ -6929,9 +6879,10 @@
                     return `${nomeCompleto} (${p.quantidade}x ${valorStr})`;
                 }).join('; ');
 
-                const pagamentosStr = v.pagamentos.map(p =>
-                    `${p.metodo} R$ ${p.valor.toFixed(2)}${p.metodo === 'Carteira' && p.status === 'pago' ? ' (pago)' : ''}`
-                ).join(', ');
+                const pagamentosStr = v.pagamentos.map(p => {
+                    const moedaTxt = p.moeda === 'USD' ? `US$ ${(p.valorOriginal != null ? p.valorOriginal : p.valor).toFixed(2)} → R$ ${p.valor.toFixed(2)}` : `R$ ${p.valor.toFixed(2)}`;
+                    return `${p.metodo} ${moedaTxt}${p.metodo === 'Carteira' && p.status === 'pago' ? ' (pago)' : ''}`;
+                }).join(', ');
 
                 html += `<tr>
                     <td>${v.id}</td>
@@ -7132,53 +7083,107 @@
         // =========================================================================
         // PDF E WHATSAPP - RELATÓRIOS
         // =========================================================================
-        function gerarPDF() {
-            const element = document.getElementById('relatorioContent');
-            if (!element) return;
-            
-            const btn = document.querySelector('#relatorios .btn-pdf');
-            if (!btn) return;
-            
-            const originalText = btn.textContent;
-            btn.textContent = '⏳ Gerando PDF...';
-            btn.disabled = true;
 
-            html2canvas(element, {
+        /**
+         * Gera PDF paginado a partir de um elemento HTML (canvas),
+         * com margens, números de página e sem cortar o conteúdo no meio.
+         */
+        function gerarPDFPaginado(element, nomeArquivo, btn) {
+            if (!element) return Promise.resolve();
+
+            const originalText = btn ? btn.textContent : '';
+            if (btn) {
+                btn.textContent = '⏳ Gerando PDF...';
+                btn.disabled = true;
+            }
+
+            return html2canvas(element, {
                 scale: 2,
                 useCORS: true,
                 allowTaint: true,
                 backgroundColor: '#ffffff',
-                logging: false
+                logging: false,
+                windowWidth: element.scrollWidth,
+                windowHeight: element.scrollHeight
             }).then(canvas => {
-                const imgData = canvas.toDataURL('image/png');
                 const { jsPDF } = window.jspdf;
                 const pdf = new jsPDF('p', 'mm', 'a4');
-                const imgWidth = 210;
-                const pageHeight = 297;
+
+                const pageWidth = pdf.internal.pageSize.getWidth();   // 210
+                const pageHeight = pdf.internal.pageSize.getHeight(); // 297
+                const margin = 10; // mm
+                const usableWidth = pageWidth - margin * 2;
+                const usableHeight = pageHeight - margin * 2 - 8; // reserva espaço para rodapé
+
+                const imgWidth = usableWidth;
                 const imgHeight = (canvas.height * imgWidth) / canvas.width;
-                let heightLeft = imgHeight;
-                let position = 0;
 
-                pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-                heightLeft -= pageHeight;
+                // Quantidade de páginas necessárias
+                const totalPages = Math.max(1, Math.ceil(imgHeight / usableHeight));
 
-                while (heightLeft > 0) {
-                    position = heightLeft - imgHeight;
-                    pdf.addPage();
-                    pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-                    heightLeft -= pageHeight;
+                // Desenha cada fatia da imagem na página correspondente
+                for (let page = 0; page < totalPages; page++) {
+                    if (page > 0) pdf.addPage();
+
+                    // Posição Y da fatia no canvas (em mm convertidos para pixels)
+                    const sourceY = (page * usableHeight * canvas.width) / imgWidth;
+                    const sourceHeight = Math.min(
+                        (usableHeight * canvas.width) / imgWidth,
+                        canvas.height - sourceY
+                    );
+
+                    // Cria um canvas temporário só com a fatia da página atual
+                    const pageCanvas = document.createElement('canvas');
+                    pageCanvas.width = canvas.width;
+                    pageCanvas.height = Math.ceil(sourceHeight);
+                    const ctx = pageCanvas.getContext('2d');
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+                    ctx.drawImage(
+                        canvas,
+                        0, sourceY, canvas.width, sourceHeight,
+                        0, 0, canvas.width, sourceHeight
+                    );
+
+                    const pageImgData = pageCanvas.toDataURL('image/png');
+                    const pageImgHeight = (sourceHeight * imgWidth) / canvas.width;
+
+                    pdf.addImage(pageImgData, 'PNG', margin, margin, imgWidth, pageImgHeight);
+
+                    // Rodapé com número da página
+                    pdf.setFontSize(9);
+                    pdf.setTextColor(100);
+                    pdf.text(
+                        `Página ${page + 1} de ${totalPages}  |  MEIO SUL - Controle de Estoque`,
+                        pageWidth / 2,
+                        pageHeight - 6,
+                        { align: 'center' }
+                    );
                 }
 
-                pdf.save(`Relatorio_${filialAtual}_${relatorioAtual}_${new Date().toISOString().slice(0, 10)}.pdf`);
+                pdf.save(nomeArquivo);
 
-                btn.textContent = originalText;
-                btn.disabled = false;
+                if (btn) {
+                    btn.textContent = originalText;
+                    btn.disabled = false;
+                }
             }).catch(error => {
                 console.error('Erro ao gerar PDF:', error);
                 alert('Erro ao gerar PDF. Tente novamente.');
-                btn.textContent = originalText;
-                btn.disabled = false;
+                if (btn) {
+                    btn.textContent = originalText;
+                    btn.disabled = false;
+                }
             });
+        }
+
+        function gerarPDF() {
+            const element = document.getElementById('relatorioContent');
+            if (!element) return;
+            
+            const btn = document.querySelector('#relatorios .btn-pdf') || document.querySelector('#acoesRelatorioPadrao .btn-pdf');
+            const nome = `Relatorio_${filialAtual}_${relatorioAtual}_${new Date().toISOString().slice(0, 10)}.pdf`;
+            gerarPDFPaginado(element, nome, btn);
         }
 
         function enviarRelatorioWhatsApp() {
