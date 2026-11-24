@@ -1593,6 +1593,28 @@
             <div id="vendasTable"></div>
         </div>
 
+        <!-- ==================== ABA CRÉDITOS ==================== -->
+        <div class="tab-content" id="creditos">
+            <div class="header-actions">
+                <div>
+                    <h2 style="color:#1a237e;">🎟️ Créditos gerados</h2>
+                    <p style="color:#666;font-size:13px;">Registre o valor do crédito e acompanhe pagamentos totais ou parciais.</p>
+                </div>
+                <div class="search-box">
+                    <select id="filtroStatusCreditos" onchange="loadCreditos()">
+                        <option value="">Todos os status</option>
+                        <option value="aguardando_valor">Aguardando valor</option>
+                        <option value="aberto">Em aberto</option>
+                        <option value="parcial">Pago parcial</option>
+                        <option value="pago">Pago</option>
+                        <option value="cancelado">Cancelado</option>
+                    </select>
+                    <input type="text" id="buscaCreditos" placeholder="Buscar vendedor ou produto..." oninput="loadCreditos()">
+                </div>
+            </div>
+            <div id="creditosTabela"></div>
+        </div>
+
         <!-- ==================== ABA RECEBIMENTOS ==================== -->
         <div class="tab-content" id="recebimentos">
             <h2 style="color:#1a237e;margin-bottom:15px;">💵 Gerenciamento de Recebimentos</h2>
@@ -1637,7 +1659,8 @@
                         <option value="Despesa de Viagem">Despesa de Viagem</option>
                         <option value="Outros">Outros</option>
                     </select>
-                    <input type="date" id="filterDespesasData" onchange="filterDespesas()">
+                    <input type="date" id="filterDespesasDataInicio" title="Data inicial" aria-label="Data inicial" onchange="filterDespesas()">
+                    <input type="date" id="filterDespesasDataFim" title="Data final" aria-label="Data final" onchange="filterDespesas()">
                 </div>
                 <button class="btn btn-primary" onclick="openModal('modalDespesa')">+ Nova Despesa</button>
             </div>
@@ -2266,6 +2289,14 @@
                     <div style="font-size:12px; color:#666; margin-top:5px;">
                         Cotação do dia: <span id="cotacaoVendaPreview">R$ 0,00</span>
                     </div>
+                </div>
+
+                <div class="form-group" style="background:#fff8e1;padding:12px;border-radius:5px;border:1px solid #ffe082;">
+                    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin:0;">
+                        <input type="checkbox" id="vendaGerarCreditos" style="width:auto;">
+                        <strong>Gerar créditos</strong>
+                    </label>
+                    <small style="color:#666;">Ao marcar, esta venda também será registrada na aba Créditos para controle do valor gerado e dos pagamentos.</small>
                 </div>
 
                 <button type="submit" class="btn btn-success" style="width: 100%;">Registrar Venda e Emitir Pedido</button>
@@ -2922,6 +2953,12 @@
             return d.recebimentos;
         }
 
+        function getCreditos() {
+            const d = getDadosFilial();
+            if (!Array.isArray(d.creditos)) d.creditos = [];
+            return d.creditos;
+        }
+
         function registrarRecebimento(dadosRecebimento) {
             const lista = getRecebimentos();
             if (dadosRecebimento.sourceKey && lista.some(r => r.sourceKey === dadosRecebimento.sourceKey)) return;
@@ -3154,6 +3191,7 @@
         function carregarTudo() {
             loadEstoque();
             loadVendas();
+            loadCreditos();
             loadClientes();
             loadDespesas();
             loadCarteira();
@@ -3185,6 +3223,8 @@
                     loadVendaSelects();
                     updateTotalPreview();
                     document.getElementById('vendaVendedor').value = ''; // preenchimento manual em cada nova venda
+                    const gerarCreditosEl = document.getElementById('vendaGerarCreditos');
+                    if (gerarCreditosEl) gerarCreditosEl.checked = false;
                     document.getElementById('vendaLocal').value = 'Sanga Puitã';
                     document.getElementById('vendaLocalOutros').classList.remove('visible');
                     document.getElementById('vendaLocalOutros').value = '';
@@ -4625,6 +4665,7 @@
             const vendedor = document.getElementById('vendaVendedor').value.trim();
             const local = getLocalSelecionado();
             const clienteId = parseInt(document.getElementById('vendaClienteId').value);
+            const gerarCreditos = document.getElementById('vendaGerarCreditos')?.checked === true;
 
             if (!vendedor) {
                 alert('Preencha o nome do vendedor.');
@@ -4839,11 +4880,40 @@
             };
 
             pedidos.push(pedido);
+
+            // Registra o crédito separado da venda, sem alterar os pagamentos ou o caixa.
+            if (gerarCreditos) {
+                const produtosCredito = produtos.map(p => {
+                    const pneu = estoque.find(e => e.id === p.pneuId) || {};
+                    return {
+                        pneuId: p.pneuId,
+                        descricao: [pneu.marca, pneu.medida, pneu.profundidade].filter(Boolean).join(' - ') || `Produto ${p.pneuId}`,
+                        quantidade: p.quantidade
+                    };
+                });
+                getCreditos().push({
+                    id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                    vendaId: venda.id,
+                    pedidoNumero: pedido.numero,
+                    vendedor: vendedor,
+                    produtos: produtosCredito,
+                    data: venda.data,
+                    valorCredito: 0,
+                    valorPago: 0,
+                    saldo: 0,
+                    status: 'aguardando_valor',
+                    filial: filialAtual,
+                    criadoPor: usuarioLogado ? usuarioLogado.nome : ''
+                });
+            }
+
             getRecebimentos().filter(r => r.vendaId === venda.id && !r.pedidoNumero).forEach(r => r.pedidoNumero = pedido.numero);
             const carteiraVenda = getCarteira().filter(c => c.vendaId === venda.id);
             carteiraVenda.forEach(c => c.pedidoNumero = pedido.numero);
 
             closeModal('modalVenda');
+            const gerarCreditosReset = document.getElementById('vendaGerarCreditos');
+            if (gerarCreditosReset) gerarCreditosReset.checked = false;
 
             document.getElementById('produtosContainer').innerHTML = `
                 <div class="produto-item">
@@ -4890,6 +4960,7 @@
             await salvarDadosFirebase();
             
             loadVendas();
+            loadCreditos();
             loadCarteira();
             carregarPedidos();
             loadEstoque();
@@ -5886,6 +5957,155 @@
         }
 
         // =========================================================================
+        // CRÉDITOS GERADOS A PARTIR DAS VENDAS
+        // =========================================================================
+        function formatarDataCredito(data) {
+            if (!data) return '-';
+            const d = new Date(data);
+            return isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR');
+        }
+
+        function escapeHTML(valor) {
+            return String(valor ?? '').replace(/[&<>"']/g, caractere => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            })[caractere]);
+        }
+
+        function loadCreditos() {
+            const container = document.getElementById('creditosTabela');
+            if (!container) return;
+
+            const busca = (document.getElementById('buscaCreditos')?.value || '').trim().toLowerCase();
+            const statusFiltro = document.getElementById('filtroStatusCreditos')?.value || '';
+            const creditos = getCreditos().filter(c => {
+                const produtosTexto = (c.produtos || []).map(p => p.descricao || '').join(' ').toLowerCase();
+                const matchBusca = !busca || (c.vendedor || '').toLowerCase().includes(busca) || produtosTexto.includes(busca);
+                const matchStatus = !statusFiltro || (c.status || 'aberto') === statusFiltro;
+                return matchBusca && matchStatus;
+            }).sort((a, b) => new Date(b.data) - new Date(a.data));
+
+            if (!creditos.length) {
+                container.innerHTML = '<p style="text-align:center;padding:25px;color:#666;">Nenhum crédito encontrado.</p>';
+                return;
+            }
+
+            let html = `<div class="table-responsive"><table>
+                <thead><tr>
+                    <th>Data / Pedido</th><th>Vendedor</th><th>Produtos vendidos</th>
+                    <th>Valor do crédito (R$)</th><th>Pago (R$)</th><th>Falta (R$)</th><th>Status</th><th>Ações</th>
+                </tr></thead><tbody>`;
+
+            creditos.forEach(c => {
+                const valor = Number(c.valorCredito) || 0;
+                const pago = Number(c.valorPago) || 0;
+                const saldo = Math.max(0, valor - pago);
+                const produtos = (c.produtos || []).map(p =>
+                    `${escapeHTML(p.descricao || 'Produto')} (Qtd: ${Number(p.quantidade) || 0})`
+                ).join('<br>') || '-';
+                const statusLabel = {
+                    aguardando_valor: 'Aguardando valor',
+                    aberto: 'Em aberto',
+                    parcial: 'Pago parcial',
+                    pago: 'Pago',
+                    cancelado: 'Cancelado'
+                }[c.status || 'aberto'] || 'Em aberto';
+                const encerrado = ['pago', 'cancelado'].includes(c.status);
+                html += `<tr>
+                    <td>${formatarDataCredito(c.data)}<br><small>${escapeHTML(c.pedidoNumero || '')}</small></td>
+                    <td>${escapeHTML(c.vendedor || '-')}</td>
+                    <td>${produtos}</td>
+                    <td style="min-width:160px;">
+                        <input type="number" min="0.01" step="0.01" id="valorCredito_${escapeHTML(c.id)}"
+                            value="${valor > 0 ? valor.toFixed(2) : ''}" placeholder="Informar valor"
+                            ${encerrado ? 'disabled' : ''} style="width:125px;padding:7px;border:1px solid #ddd;border-radius:4px;">
+                        ${!encerrado ? `<button class="btn-acao btn-info" onclick="salvarValorCredito('${escapeHTML(c.id)}')">Salvar</button>` : ''}
+                    </td>
+                    <td>R$ ${pago.toFixed(2)}</td>
+                    <td style="font-weight:bold;color:${saldo > 0 ? '#c62828' : '#2e7d32'};">R$ ${saldo.toFixed(2)}</td>
+                    <td>${statusLabel}</td>
+                    <td style="min-width:190px;">
+                        ${!encerrado ? `<button class="btn-acao btn-success" onclick="marcarCreditoPago('${escapeHTML(c.id)}')">Pago</button>
+                        <button class="btn-acao btn-info" onclick="pagarCreditoParcial('${escapeHTML(c.id)}')">Pago parcial</button>
+                        <button class="btn-acao btn-danger" onclick="cancelarCredito('${escapeHTML(c.id)}')">Cancelar</button>` : '-'}
+                    </td>
+                </tr>`;
+            });
+            html += '</tbody></table></div>';
+            container.innerHTML = html;
+        }
+
+        async function salvarValorCredito(id) {
+            const credito = getCreditos().find(c => String(c.id) === String(id));
+            if (!credito || ['pago', 'cancelado'].includes(credito.status)) return;
+            const campo = document.getElementById(`valorCredito_${id}`);
+            const valor = Number(campo?.value);
+            if (!Number.isFinite(valor) || valor <= 0) {
+                alert('Informe um valor de crédito maior que zero.');
+                return;
+            }
+            if (valor + 0.001 < (Number(credito.valorPago) || 0)) {
+                alert('O valor do crédito não pode ser menor que o total já pago.');
+                return;
+            }
+            credito.valorCredito = Number(valor.toFixed(2));
+            credito.saldo = Number((credito.valorCredito - (Number(credito.valorPago) || 0)).toFixed(2));
+            credito.status = credito.saldo <= 0.01 ? 'pago' : (credito.valorPago > 0 ? 'parcial' : 'aberto');
+            await salvarDadosFirebase();
+            loadCreditos();
+        }
+
+        async function marcarCreditoPago(id) {
+            const credito = getCreditos().find(c => String(c.id) === String(id));
+            if (!credito || ['pago', 'cancelado'].includes(credito.status)) return;
+            const valor = Number(credito.valorCredito) || 0;
+            if (valor <= 0) {
+                alert('Informe e salve primeiro o valor do crédito.');
+                return;
+            }
+            credito.valorPago = Number(valor.toFixed(2));
+            credito.saldo = 0;
+            credito.status = 'pago';
+            credito.dataPagamento = new Date().toISOString();
+            await salvarDadosFirebase();
+            loadCreditos();
+        }
+
+        async function pagarCreditoParcial(id) {
+            const credito = getCreditos().find(c => String(c.id) === String(id));
+            if (!credito || ['pago', 'cancelado'].includes(credito.status)) return;
+            const valorCredito = Number(credito.valorCredito) || 0;
+            if (valorCredito <= 0) {
+                alert('Informe e salve primeiro o valor do crédito.');
+                return;
+            }
+            const saldoAtual = Math.max(0, valorCredito - (Number(credito.valorPago) || 0));
+            const entrada = prompt(`Informe o valor pago agora. Falta R$ ${saldoAtual.toFixed(2)}:`);
+            if (entrada === null) return;
+            const valorPagoAgora = Number(String(entrada).replace(',', '.'));
+            if (!Number.isFinite(valorPagoAgora) || valorPagoAgora <= 0 || valorPagoAgora > saldoAtual + 0.01) {
+                alert('Informe um valor válido, maior que zero e não superior ao saldo restante.');
+                return;
+            }
+            credito.valorPago = Number(((Number(credito.valorPago) || 0) + valorPagoAgora).toFixed(2));
+            credito.saldo = Math.max(0, Number((valorCredito - credito.valorPago).toFixed(2)));
+            credito.status = credito.saldo <= 0.01 ? 'pago' : 'parcial';
+            credito.ultimoPagamento = new Date().toISOString();
+            await salvarDadosFirebase();
+            loadCreditos();
+        }
+
+        async function cancelarCredito(id) {
+            const credito = getCreditos().find(c => String(c.id) === String(id));
+            if (!credito || ['pago', 'cancelado'].includes(credito.status)) return;
+            if (!confirm('Deseja cancelar este crédito? A venda e o estoque não serão alterados.')) return;
+            credito.status = 'cancelado';
+            credito.saldo = 0;
+            credito.canceladoEm = new Date().toISOString();
+            await salvarDadosFirebase();
+            loadCreditos();
+        }
+
+        // =========================================================================
         // DESPESAS
         // =========================================================================
         function toggleDespesaOutros() {
@@ -5945,23 +6165,29 @@
             alert('Despesa registrada com sucesso!');
         });
 
+        function getDespesasFiltradas() {
+            const search = document.getElementById('searchDespesas')?.value.toLowerCase() || '';
+            const tipoFiltro = document.getElementById('filterDespesasTipo')?.value || '';
+            const dataInicio = document.getElementById('filterDespesasDataInicio')?.value || '';
+            const dataFim = document.getElementById('filterDespesasDataFim')?.value || '';
+
+            return getDespesas().filter(d => {
+                const descricao = (d.descricao || '').toLowerCase();
+                const tipo = (d.tipo || '').toLowerCase();
+                const matchSearch = descricao.includes(search) || tipo.includes(search);
+                const matchTipo = !tipoFiltro || d.tipo === tipoFiltro;
+                const data = String(d.data || '').slice(0, 10);
+                const matchInicio = !dataInicio || data >= dataInicio;
+                const matchFim = !dataFim || data <= dataFim;
+                return matchSearch && matchTipo && matchInicio && matchFim;
+            });
+        }
+
         function loadDespesas() {
             const container = document.getElementById('despesasList');
             if (!container) return;
             
-            const search = document.getElementById('searchDespesas')?.value.toLowerCase() || '';
-            const tipoFiltro = document.getElementById('filterDespesasTipo')?.value || '';
-            const dataFiltro = document.getElementById('filterDespesasData')?.value || '';
-
-            let despesas = getDespesas();
-
-            let filtered = despesas.filter(d => {
-                const matchSearch = d.descricao.toLowerCase().includes(search) ||
-                    d.tipo.toLowerCase().includes(search);
-                const matchTipo = !tipoFiltro || d.tipo === tipoFiltro;
-                const matchData = !dataFiltro || d.data === dataFiltro;
-                return matchSearch && matchTipo && matchData;
-            });
+            const filtered = getDespesasFiltradas();
 
             if (filtered.length === 0) {
                 container.innerHTML = '<p style="text-align: center; padding: 20px;">Nenhuma despesa registrada.</p>';
@@ -6027,7 +6253,7 @@
         }
 
         function atualizarStatsDespesas() {
-            const despesas = getDespesas();
+            const despesas = getDespesasFiltradas();
             const total = despesas.reduce((sum, d) => sum + d.valor, 0);
             const qtd = despesas.length;
             const media = qtd > 0 ? total / qtd : 0;
@@ -6045,7 +6271,7 @@
         // PDF DESPESAS
         // =========================================================================
         function gerarPDFDespesas() {
-            const despesas = getDespesas();
+            const despesas = getDespesasFiltradas();
 
             if (despesas.length === 0) {
                 alert('Não há despesas para gerar o PDF.');
@@ -7620,6 +7846,7 @@
                 const target = document.getElementById(this.dataset.tab);
                 if (target) target.classList.add('active');
                 if (this.dataset.tab === 'pedidos') carregarPedidos();
+                if (this.dataset.tab === 'creditos') loadCreditos();
                 if (this.dataset.tab === 'carteira') loadCarteira();
                 if (this.dataset.tab === 'recebimentos') loadRecebimentos();
                 if (this.dataset.tab === 'contas') carregarContas();
