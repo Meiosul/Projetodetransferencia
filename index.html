@@ -1610,7 +1610,7 @@
                         <option value="pago">Pago</option>
                         <option value="cancelado">Cancelado</option>
                     </select>
-                    <input type="text" id="buscaCreditos" placeholder="Buscar vendedor ou produto..." oninput="loadCreditos()">
+                    <input type="text" id="buscaCreditos" placeholder="Buscar cliente, vendedor ou produto..." oninput="loadCreditos()">
                 </div>
             </div>
             <div id="creditosTabela"></div>
@@ -4892,10 +4892,17 @@
                         quantidade: p.quantidade
                     };
                 });
+                const clienteCredito = clientes.find(c => String(c.id) === String(clienteId));
+                const nomeClienteCredito = clienteCredito
+                    ? `${clienteCredito.nome || ''} ${clienteCredito.sobrenome || ''}`.trim()
+                    : 'Cliente não identificado';
+
                 getCreditos().push({
                     id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
                     vendaId: venda.id,
                     pedidoNumero: pedido.numero,
+                    clienteId: clienteId,
+                    clienteNome: nomeClienteCredito,
                     vendedor: vendedor,
                     produtos: produtosCredito,
                     data: venda.data,
@@ -5978,9 +5985,22 @@
 
             const busca = (document.getElementById('buscaCreditos')?.value || '').trim().toLowerCase();
             const statusFiltro = document.getElementById('filtroStatusCreditos')?.value || '';
-            const creditos = getCreditos().filter(c => {
+            const creditos = getCreditos().map(c => {
+                // Compatibilidade: créditos antigos não guardavam o cliente; recupera pela venda original.
+                const vendaOrigem = getVendas().find(v => String(v.id) === String(c.vendaId));
+                const clienteIdCredito = c.clienteId != null ? c.clienteId : vendaOrigem?.clienteId;
+                const clienteCadastro = clientes.find(cl => String(cl.id) === String(clienteIdCredito));
+                const nomeCliente = c.clienteNome ||
+                    (clienteCadastro ? `${clienteCadastro.nome || ''} ${clienteCadastro.sobrenome || ''}`.trim() : '') ||
+                    'Cliente não identificado';
+                return { ...c, clienteId: clienteIdCredito, clienteNome: nomeCliente };
+            }).filter(c => {
                 const produtosTexto = (c.produtos || []).map(p => p.descricao || '').join(' ').toLowerCase();
-                const matchBusca = !busca || (c.vendedor || '').toLowerCase().includes(busca) || produtosTexto.includes(busca);
+                const matchBusca = !busca ||
+                    (c.clienteNome || '').toLowerCase().includes(busca) ||
+                    (c.vendedor || '').toLowerCase().includes(busca) ||
+                    produtosTexto.includes(busca) ||
+                    String(c.pedidoNumero || '').toLowerCase().includes(busca);
                 const matchStatus = !statusFiltro || (c.status || 'aberto') === statusFiltro;
                 return matchBusca && matchStatus;
             }).sort((a, b) => new Date(b.data) - new Date(a.data));
@@ -5992,7 +6012,7 @@
 
             let html = `<div class="table-responsive"><table>
                 <thead><tr>
-                    <th>Data / Pedido</th><th>Vendedor</th><th>Produtos vendidos</th>
+                    <th>Data / Pedido</th><th>Cliente</th><th>Vendedor</th><th>Produtos vendidos</th>
                     <th>Valor do crédito (R$)</th><th>Pago (R$)</th><th>Falta (R$)</th><th>Status</th><th>Ações</th>
                 </tr></thead><tbody>`;
 
@@ -6013,6 +6033,7 @@
                 const encerrado = ['pago', 'cancelado'].includes(c.status);
                 html += `<tr>
                     <td>${formatarDataCredito(c.data)}<br><small>${escapeHTML(c.pedidoNumero || '')}</small></td>
+                    <td><strong>${escapeHTML(c.clienteNome || 'Cliente não identificado')}</strong></td>
                     <td>${escapeHTML(c.vendedor || '-')}</td>
                     <td>${produtos}</td>
                     <td style="min-width:160px;">
