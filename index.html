@@ -2498,6 +2498,43 @@
 
     <script>
         // =========================================================================
+        // CRÉDITOS NO FIRESTORE (coleção própria, independente do documento da filial)
+        // =========================================================================
+        async function carregarCreditosFirebase(filial) {
+            const ref = db.collection('creditos').where('filial', '==', filial);
+            const snapshot = await ref.get();
+            const creditosNuvem = [];
+            snapshot.forEach(doc => creditosNuvem.push({ id: doc.id, ...doc.data() }));
+
+            // Migração automática: preserva créditos que já estavam dentro de dados/{filial}.
+            const creditosLegados = Array.isArray(dados[filial]?.creditos) ? dados[filial].creditos : [];
+            const idsNuvem = new Set(creditosNuvem.map(c => String(c.id)));
+            const legadosPendentes = creditosLegados.filter(c => !idsNuvem.has(String(c.id)));
+
+            dados[filial].creditos = [...creditosNuvem, ...legadosPendentes];
+            if (legadosPendentes.length) {
+                await salvarCreditosFirebase(filial);
+            }
+        }
+
+        async function salvarCreditosFirebase(filial) {
+            const lista = Array.isArray(dados[filial]?.creditos) ? dados[filial].creditos : [];
+            // Firestore limita cada batch a 500 operações; usamos lotes menores.
+            for (let inicio = 0; inicio < lista.length; inicio += 450) {
+                const batch = db.batch();
+                lista.slice(inicio, inicio + 450).forEach(credito => {
+                    if (credito.id === undefined || credito.id === null || String(credito.id).trim() === '') {
+                        throw new Error('Foi encontrado um crédito sem identificador. O registro não foi salvo.');
+                    }
+                    const id = String(credito.id);
+                    const ref = db.collection('creditos').doc(id);
+                    batch.set(ref, { ...credito, id, filial }, { merge: true });
+                });
+                await batch.commit();
+            }
+        }
+
+        // =========================================================================
         // CONFIGURAÇÃO DO FIREBASE
         // =========================================================================
         const firebaseConfig = {
@@ -2770,7 +2807,8 @@
             filiais.forEach(filial => {
                 const unsubDados = db.collection('dados').doc(filial).onSnapshot((snapshot) => {
                     if (snapshot.exists) {
-                        dados[filial] = snapshot.data();
+                        const creditosEmMemoria = Array.isArray(dados[filial]?.creditos) ? dados[filial].creditos : [];
+                        dados[filial] = { ...snapshot.data(), creditos: creditosEmMemoria };
                         normalizarCarteiraDados();
                         if (dadosCarregados && filial === filialAtual) {
                             loadEstoque();
@@ -2787,6 +2825,23 @@
                     }
                 }, (error) => console.error(`Erro no listener da filial ${filial}:`, error));
                 unsubscribeListeners.push(unsubDados);
+
+                const unsubCreditos = db.collection('creditos').where('filial', '==', filial)
+                    .onSnapshot((snapshot) => {
+                        const creditosNuvem = [];
+                        snapshot.forEach(doc => creditosNuvem.push({ id: doc.id, ...doc.data() }));
+                        if (!Array.isArray(dados[filial].creditos)) dados[filial].creditos = [];
+                        const locais = dados[filial].creditos;
+                        const idsNuvem = new Set(creditosNuvem.map(c => String(c.id)));
+                        const pendentesLocais = locais.filter(c => !idsNuvem.has(String(c.id)));
+                        dados[filial].creditos = [...creditosNuvem, ...pendentesLocais];
+                        if (dadosCarregados && filial === filialAtual) loadCreditos();
+                    }, (error) => {
+                        console.error(`Erro no listener de créditos da filial ${filial}:`, error);
+                        const sync = document.getElementById('syncStatus');
+                        if (sync) sync.textContent = '⚠️ Erro ao sincronizar créditos';
+                    });
+                unsubscribeListeners.push(unsubCreditos);
             });
         }
 
@@ -2820,6 +2875,12 @@
                     } else {
                         await salvarFilialFirebase(filial);
                     }
+                }
+
+                // Carrega os créditos da coleção própria e migra registros antigos automaticamente.
+                for (const filial of filiais) {
+                    if (!Array.isArray(dados[filial].creditos)) dados[filial].creditos = [];
+                    await carregarCreditosFirebase(filial);
                 }
 
                 normalizarCarteiraDados();
@@ -2866,10 +2927,14 @@
 
         async function salvarFilialFirebase(filial) {
             try {
-                await db.collection('dados').doc(filial).set(dados[filial]);
+                // Os créditos são persistidos separadamente na coleção 'creditos'.
+                const dadosFilial = { ...dados[filial] };
+                delete dadosFilial.creditos;
+                await db.collection('dados').doc(filial).set(dadosFilial);
             } catch (error) {
                 console.error(`Erro ao salvar filial ${filial}:`, error);
                 salvarBackupLocal();
+                throw error;
             }
         }
 
@@ -2885,6 +2950,10 @@
 
                 await salvarFilialFirebase('toledo');
                 await salvarFilialFirebase('filial');
+
+                // Salva créditos das duas filiais na coleção independente do Firestore.
+                await salvarCreditosFirebase('toledo');
+                await salvarCreditosFirebase('filial');
 
                 salvarBackupLocal();
 
